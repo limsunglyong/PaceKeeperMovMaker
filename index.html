@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PaceKeeper Movie Maker</title>
+  <link rel="stylesheet" href="src/renderer/app.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="mark"></span>
+        <div>
+          <strong>PaceKeeper</strong>
+          <small>Movie Maker</small>
+        </div>
+      </div>
+      <div class="transport" aria-label="Transport">
+        <button id="rewindBtn" class="icon-btn" title="Rewind">|&lt;</button>
+        <button id="stopBtn" class="icon-btn" title="Stop">[]</button>
+        <button id="playBtn" class="play-btn" title="Play">Play</button>
+        <button id="forwardBtn" class="icon-btn" title="Forward">&gt;|</button>
+        <div class="clock">
+          <span id="liveLamp"></span>
+          <b id="timecode">00:00:00</b>
+          <small id="duration">DUR 00:00:00</small>
+        </div>
+      </div>
+      <button id="exportBtn" class="export-btn">Export</button>
+    </header>
+
+    <main class="workspace">
+      <aside class="projects">
+        <div class="panel-head">
+          <span>Projects</span>
+          <button id="newProjectBtn" title="New project">+</button>
+        </div>
+        <input id="projectName" class="field" value="Untitled" aria-label="Project name" />
+        <div class="project-actions">
+          <button id="saveProjectBtn">Save</button>
+          <button id="loadFileBtn">Open</button>
+        </div>
+        <div id="projectList" class="project-list"></div>
+      </aside>
+
+      <section class="center">
+        <div class="preview">
+          <canvas id="stage" width="1280" height="720"></canvas>
+          <video id="videoEl" playsinline muted></video>
+          <audio id="audioEl"></audio>
+        </div>
+        <div class="toolbar">
+          <button id="videoBtn">Import Video</button>
+          <button id="audioBtn">Import Audio</button>
+          <button id="subtitleBtn">Add Subtitle</button>
+          <button id="logoBtn">Add Logo</button>
+          <button id="addTrackBtn">Add Track</button>
+          <span class="divider"></span>
+          <button id="vizBtn" class="toggle is-on">Visualizer</button>
+          <button id="bpmBtn" class="toggle is-on">BPM</button>
+          <label class="mini-field">BPM <input id="bpmInput" type="number" min="40" max="240" placeholder="120" /></label>
+          <button id="tapBtn">Tap</button>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <h2>Inspector</h2>
+        <div id="inspectorBody"></div>
+      </aside>
+    </main>
+
+    <section class="timeline">
+      <div id="laneLabels" class="lane-labels"></div>
+      <div id="timelineScroll" class="timeline-scroll">
+        <div id="timelineInner" class="timeline-inner">
+          <div id="ruler" class="ruler"></div>
+          <div id="playhead" class="playhead"></div>
+        </div>
+      </div>
+      <footer class="statusbar">
+        <span id="status">Ready. Import a video and an audio file to begin.</span>
+        <div class="zoom">
+          <button id="zoomOutBtn">-</button>
+          <button id="fitBtn">Fit</button>
+          <button id="zoomInBtn">+</button>
+        </div>
+      </footer>
+    </section>
+
+    <input id="videoInput" type="file" accept="video/*" hidden />
+    <input id="audioInput" type="file" accept="audio/*" hidden />
+    <input id="logoInput" type="file" accept="image/*" hidden />
+    <input id="projectInput" type="file" accept=".pkmm.json,application/json" hidden />
+
+    <div id="trackModal" class="modal-backdrop" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="trackModalTitle">
+        <div class="modal-head">
+          <h2 id="trackModalTitle">Add Track</h2>
+          <button id="trackModalClose" title="Close">x</button>
+        </div>
+        <div class="track-type-grid">
+          <button data-add-track-type="video">
+            <b>Video</b>
+            <span>동영상 레인을 추가합니다.</span>
+          </button>
+          <button data-add-track-type="audio">
+            <b>Audio</b>
+            <span>오디오 레인을 추가합니다.</span>
+          </button>
+          <button data-add-track-type="overlay">
+            <b>Overlay</b>
+            <span>자막/로고 레인을 추가합니다.</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="src/renderer/app.js"></script>
+</body>
+</html>
