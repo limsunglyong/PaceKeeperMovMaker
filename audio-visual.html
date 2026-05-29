@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PaceKeeper Audio Visualization Gallery</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0c0d10;
+      --panel: #15171d;
+      --line: rgba(255, 255, 255, 0.09);
+      --txt: #eef1f7;
+      --dim: #8f96a8;
+      --danger: #ff4d5e;
+      --blue: #5b8cff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      font-family: Inter, system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 18% 4%, rgba(45, 212, 191, 0.12), transparent 30%),
+        radial-gradient(circle at 88% 8%, rgba(91, 140, 255, 0.11), transparent 28%),
+        var(--bg);
+      color: var(--txt);
+      padding: 28px;
+      overflow-y: auto;
+    }
+
+    header, main {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto;
+      gap: 24px;
+      align-items: center;
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px 24px;
+      box-shadow: 0 18px 55px rgba(0, 0, 0, 0.22);
+    }
+
+    h1 {
+      font-size: clamp(22px, 2.4vw, 34px);
+      font-weight: 800;
+      letter-spacing: 0;
+      line-height: 1.08;
+    }
+
+    .brand p {
+      margin-top: 8px;
+      color: var(--dim);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      min-width: min(540px, 100%);
+    }
+
+    .toolbar-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .file-label, button {
+      min-height: 42px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0 16px;
+      font: 700 13px/1 Inter, system-ui, sans-serif;
+      color: white;
+      cursor: pointer;
+      transition: transform 0.14s ease, filter 0.14s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    button:hover, .file-label:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    button:active, .file-label:active { transform: translateY(0); }
+
+    .file-label { background: #242833; border: 1px solid var(--line); }
+    .btn-primary { background: var(--danger); box-shadow: 0 10px 28px rgba(255, 77, 94, 0.22); }
+    .btn-secondary { background: var(--blue); box-shadow: 0 10px 28px rgba(91, 140, 255, 0.22); }
+    .btn-ghost { background: #252934; border: 1px solid var(--line); color: var(--txt); }
+    input[type="file"] { display: none; }
+
+    .color-picker {
+      display: flex;
+      gap: 7px;
+      min-height: 42px;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.24);
+      padding: 7px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+
+    .swatch {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+
+    .swatch.active {
+      border-color: white;
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.42);
+    }
+
+    .status {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      color: var(--dim);
+      font-size: 12px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+    }
+
+    .badge {
+      color: var(--txt);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+
+    .now-playing {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 360px;
+    }
+
+    .overview {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    .effect-pill {
+      min-height: 58px;
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.045);
+      padding: 12px;
+      color: var(--txt);
+      text-align: left;
+      display: block;
+      box-shadow: none;
+    }
+
+    .effect-pill:hover { filter: brightness(1.12); transform: translateY(-1px); }
+
+    .effect-pill.active {
+      border-color: color-mix(in srgb, var(--effect-color, #2dd4bf) 70%, white);
+      background: color-mix(in srgb, var(--effect-color, #2dd4bf) 16%, rgba(255, 255, 255, 0.045));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--effect-color, #2dd4bf) 30%, transparent);
+    }
+
+    .effect-pill b {
+      display: block;
+      font-size: 13px;
+      color: var(--txt);
+      margin-bottom: 5px;
+    }
+
+    .effect-pill span {
+      color: var(--dim);
+      font-size: 11px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .card {
+      background: color-mix(in srgb, var(--panel) 94%, black);
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .card-header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .card-desc {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--dim);
+      line-height: 1.4;
+    }
+
+    .card-code {
+      color: var(--dim);
+      font-size: 11px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      white-space: nowrap;
+    }
+
+    .variant-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .variant-btn {
+      min-height: 34px;
+      border-radius: 7px;
+      padding: 0 12px;
+      background: rgba(255, 255, 255, 0.055);
+      border: 1px solid transparent;
+      color: var(--dim);
+      box-shadow: none;
+    }
+
+    .variant-btn.active {
+      color: var(--txt);
+      border-color: color-mix(in srgb, var(--variant-color, #2dd4bf) 60%, white);
+      background: color-mix(in srgb, var(--variant-color, #2dd4bf) 16%, rgba(255, 255, 255, 0.055));
+    }
+
+    .canvas-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #05060a;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .stage-card .canvas-wrap {
+      max-height: min(72vh, 760px);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    audio {
+      width: 100%;
+      height: 42px;
+      filter: invert(1) hue-rotate(180deg);
+      opacity: 0.82;
+    }
+
+    @media (max-width: 920px) {
+      body { padding: 16px; }
+      header { grid-template-columns: 1fr; }
+      .toolbar-row, .status { justify-content: flex-start; }
+      .toolbar { min-width: 0; }
+    }
+
+    @media (max-width: 520px) {
+      .grid { grid-template-columns: 1fr; }
+      .file-label, button { width: 100%; }
+      .color-picker { width: 100%; justify-content: center; }
+      .status { flex-direction: column; }
+      .now-playing { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>Audio Visualization Gallery</h1>
+      <p>Recommended 15 audio visualization effects. Pick one from the menu to keep playback smooth.</p>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <label class="file-label" for="audio-file">Choose Audio File</label>
+        <input id="audio-file" type="file" accept="audio/*">
+        <button class="btn-primary" id="btn-demo">Demo Start</button>
+        <button class="btn-secondary" id="btn-mic">Use Live Mic</button>
+        <button class="btn-ghost" id="btn-stop">Stop</button>
+      </div>
+      <div class="toolbar-row">
+        <div class="color-picker" aria-label="Visualizer color">
+          <div class="swatch active" style="background: #2dd4bf;" data-color="#2dd4bf" title="Mint"></div>
+          <div class="swatch" style="background: #ff4d5e;" data-color="#ff4d5e" title="Red"></div>
+          <div class="swatch" style="background: #a78bfa;" data-color="#a78bfa" title="Violet"></div>
+          <div class="swatch" style="background: #ffb020;" data-color="#ffb020" title="Amber"></div>
+          <div class="swatch" style="background: #5b8cff;" data-color="#5b8cff" title="Blue"></div>
+          <div class="swatch" style="background: #ffffff;" data-color="#ffffff" title="White"></div>
+        </div>
+      </div>
+      <div class="status">
+        <span class="badge">Effects: 15</span>
+        <span class="badge now-playing" id="source-status">Source: Idle</span>
+      </div>
+      <audio id="audio-player" controls></audio>
+    </div>
+  </header>
+
+  <main>
+    <section class="overview" id="effect-menu" aria-label="Visualizer effect menu"></section>
+    <section class="grid">
+      <article class="card stage-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title" id="active-title">1. Bars</div>
+            <div class="card-desc" id="active-desc">Neon spectrum bars with reflection</div>
+          </div>
+          <div class="card-code" id="active-code">bars</div>
+        </div>
+        <div class="variant-bar" id="variant-menu" aria-label="Visualizer variants"></div>
+        <div class="canvas-wrap"><canvas id="visual-canvas"></canvas></div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const FFT_SIZE = 256;
+    const EFFECTS = [
+      { id: "bars", label: "1. Bars", color: "#2dd4bf", desc: "Neon spectrum bars with reflection" },
+      { id: "mirror", label: "2. Mirror", color: "#5b8cff", desc: "Symmetric capsule equalizer" },
+      { id: "ribbon", label: "3. Ribbon", color: "#a78bfa", desc: "Layered flowing audio ribbons" },
+      { id: "blocks", label: "4. Block Grid", color: "#ff4d5e", desc: "Beat-reactive tile mosaic" },
+      { id: "dots", label: "5. Dots", color: "#ffb020", desc: "Spectrum matrix grid" },
+      { id: "radial", label: "6. Radial Bars", color: "#38bdf8", desc: "Circular frequency spikes" },
+      { id: "orbit", label: "7. Orbit Rings", color: "#f472b6", desc: "Rotating bass-reactive satellites" },
+      { id: "particles", label: "8. Particles", color: "#34d399", desc: "Beat-reactive particle burst" },
+      { id: "glitch", label: "9. Glitch Scan", color: "#facc15", desc: "Horizontal scanline distortion" },
+      { id: "honeycomb", label: "10. Honeycomb", color: "#fb7185", desc: "Hex cell frequency lattice" },
+      { id: "level", label: "11. Level Meter", color: "#22c55e", desc: "Fast RMS style level strips" },
+      { id: "spectrumLine", label: "12. Spectrum Line", color: "#f59e0b", desc: "Thin skyline frequency trace" },
+      { id: "vinyl", label: "13. Vinyl Pulse", color: "#06b6d4", desc: "Record grooves reacting to bass" },
+      { id: "rain", label: "14. Meteor Rain", color: "#c084fc", desc: "Falling streaks driven by highs" },
+      { id: "peak", label: "15. Peak Hold", color: "#ef4444", desc: "Stacked meters with peak memory" },
+    ];
+
+    const VARIANTS = {
+      bars: ["Reflection", "Center Split", "Dense"],
+      mirror: ["Capsules", "Needles", "Wide"],
+      ribbon: ["Liquid", "Twin Flow", "Wire"],
+      blocks: ["Mosaic", "Pulse Wall", "Sparse"],
+      dots: ["Matrix", "Orbit Dots", "Fine Grid"],
+      radial: ["Spikes", "Halo", "Compass"],
+      orbit: ["Satellites", "Nested", "Comets"],
+      particles: ["Burst", "Swarm", "Spark"],
+      glitch: ["Scanline", "Offset", "Blocks"],
+      honeycomb: ["Hex Outline", "Filled Cells", "Mini Cells"],
+      level: ["Band Meter", "Stereo Bars", "Segment LED"],
+      spectrumLine: ["Skyline", "Twin Trace", "Needle Line"],
+      vinyl: ["Grooves", "Turntable", "Radar"],
+      rain: ["Meteor", "Vertical Rain", "Sparks"],
+      peak: ["Classic Bars", "LED Stack", "Horizontal"],
+    };
+
+    const effectMenu = document.getElementById("effect-menu");
+    const variantMenu = document.getElementById("variant-menu");
+    const activeTitle = document.getElementById("active-title");
+    const activeDesc = document.getElementById("active-desc");
+    const activeCode = document.getElementById("active-code");
+    const visualCanvas = document.getElementById("visual-canvas");
+    const visualCtx = visualCanvas.getContext("2d");
+    const audioPlayer = document.getElementById("audio-player");
+    const sourceStatus = document.getElementById("source-status");
+    const btnDemo = document.getElementById("btn-demo");
+    const btnMic = document.getElementById("btn-mic");
+    const btnStop = document.getElementById("btn-stop");
+
+    let currentColor = "#2dd4bf";
+    let audioContext = null;
+    let analyser = null;
+    let audioSource = null;
+    let micSource = null;
+    let micStream = null;
+    let demoTimer = null;
+    let isDemoPlaying = false;
+    let isMicActive = false;
+    let currentEffectId = EFFECTS[0].id;
+    let currentVariant = VARIANTS[currentEffectId][0];
+    let freqData = new Uint8Array(FFT_SIZE / 2);
+
+    const smoothBuffer = {
+      bars: new Float32Array(96),
+      mirror: new Float32Array(64),
+      ribbon1: new Float32Array(32),
+      ribbon2: new Float32Array(32),
+      matrix: new Float32Array(48),
+      radial: new Float32Array(96),
+      blocks: new Float32Array(128),
+      honeycomb: new Float32Array(128),
+      spectrumLine: new Float32Array(96),
+      rain: new Float32Array(70),
+      level: 0,
+      vinyl: 0,
+      peak: new Float32Array(32),
+      peakHold: new Float32Array(32),
+      bass: 0,
+      glitch: 0,
+      particles: Array.from({ length: 90 }, (_, i) => ({
+        angle: (i / 90) * Math.PI * 2,
+        radius: 26 + (i % 18) * 7,
+        speed: 0.45 + (i % 11) * 0.08,
+        size: 1.4 + (i % 5) * 0.5,
+      })),
+      rainDrops: Array.from({ length: 70 }, (_, i) => ({
+        x: (i * 73) % 1000 / 1000,
+        y: (i * 191) % 1000 / 1000,
+        len: 16 + (i % 8) * 6,
+        speed: 0.006 + (i % 9) * 0.0016,
+      })),
+    };
+
+    visualCanvas.width = 1280;
+    visualCanvas.height = 720;
+
+    effectMenu.innerHTML = EFFECTS.map((effect) => `
+      <button class="effect-pill ${effect.id === currentEffectId ? "active" : ""}" data-effect="${effect.id}" style="--effect-color: ${effect.color};">
+        <b>${effect.label.replace(/^[0-9]+\\.\\s*/, "")}</b>
+        <span>${effect.id}</span>
+      </button>
+    `).join("");
+
+    effectMenu.querySelectorAll(".effect-pill").forEach((button) => {
+      button.addEventListener("click", () => setActiveEffect(button.dataset.effect));
+    });
+
+    function setActiveEffect(effectId) {
+      const effect = EFFECTS.find((item) => item.id === effectId) || EFFECTS[0];
+      currentEffectId = effect.id;
+      currentVariant = VARIANTS[effect.id][0];
+      activeTitle.textContent = effect.label;
+      activeTitle.style.color = effect.color;
+      activeDesc.textContent = effect.desc;
+      activeCode.textContent = effect.id;
+      effectMenu.querySelectorAll(".effect-pill").forEach((button) => {
+        button.classList.toggle("active", button.dataset.effect === effect.id);
+      });
+      visualCtx.fillStyle = "#05060a";
+      visualCtx.fillRect(0, 0, visualCanvas.width, visualCanvas.height);
+      renderVariantMenu(effect);
+    }
+
+    function renderVariantMenu(effect) {
+      variantMenu.style.setProperty("--variant-color", effect.color);
+      variantMenu.innerHTML = VARIANTS[effect.id].map((variant) => `
+        <button class="variant-btn ${variant === currentVariant ? "active" : ""}" data-variant="${variant}">
+          ${variant}
+        </button>
+      `).join("");
+      variantMenu.querySelectorAll(".variant-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          currentVariant = button.dataset.variant;
+          variantMenu.querySelectorAll(".variant-btn").forEach((item) => {
+            item.classList.toggle("active", item.dataset.variant === currentVariant);
+          });
+        });
+      });
+    }
+
+    setActiveEffect(currentEffectId);
+
+    document.querySelectorAll(".swatch").forEach((swatch) => {
+      swatch.addEventListener("click", (event) => {
+        document.querySelectorAll(".swatch").forEach((item) => item.classList.remove("active"));
+        event.currentTarget.classList.add("active");
+        currentColor = event.currentTarget.dataset.color;
+      });
+    });
+
+    document.getElementById("audio-file").addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      stopDemo();
+      stopMic();
+      initAudio();
+      connectAudioElement();
+
+      audioPlayer.src = URL.createObjectURL(file);
+      audioPlayer.play();
+      sourceStatus.textContent = `Source: ${file.name}`;
+    });
+
+    btnDemo.addEventListener("click", () => {
+      if (isDemoPlaying) {
+        stopDemo();
+        sourceStatus.textContent = "Source: Idle";
+        return;
+      }
+
+      stopMic();
+      audioPlayer.pause();
+      audioPlayer.removeAttribute("src");
+      audioPlayer.load();
+      isDemoPlaying = true;
+      btnDemo.textContent = "Stop Demo";
+      sourceStatus.textContent = "Source: Demo Noise";
+      simulateNoise();
+    });
+
+    btnMic.addEventListener("click", async () => {
+      if (isMicActive) {
+        stopMic();
+        sourceStatus.textContent = "Source: Idle";
+        return;
+      }
+
+      try {
+        stopDemo();
+        initAudio();
+        audioPlayer.pause();
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micSource = audioContext.createMediaStreamSource(micStream);
+        micSource.connect(analyser);
+        isMicActive = true;
+        btnMic.textContent = "Stop Microphone";
+        sourceStatus.textContent = "Source: Live Mic";
+      } catch (err) {
+        alert("Microphone permission was denied or no microphone was found.");
+      }
+    });
+
+    btnStop.addEventListener("click", () => {
+      stopDemo();
+      stopMic();
+      audioPlayer.pause();
+      freqData.fill(0);
+      sourceStatus.textContent = "Source: Idle";
+    });
+
+    function initAudio() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = FFT_SIZE;
+        analyser.smoothingTimeConstant = 0.75;
+      }
+
+      if (audioContext.state === "suspended") audioContext.resume();
+    }
+
+    function connectAudioElement() {
+      if (!audioSource) {
+        audioSource = audioContext.createMediaElementSource(audioPlayer);
+        audioSource.connect(analyser);
+        analyser.connect(audioContext.destination);
+      }
+    }
+
+    function stopDemo() {
+      isDemoPlaying = false;
+      btnDemo.textContent = "Demo Start";
+      if (demoTimer) {
+        clearTimeout(demoTimer);
+        demoTimer = null;
+      }
+    }
+
+    function stopMic() {
+      isMicActive = false;
+      btnMic.textContent = "Use Live Mic";
+      if (micSource) {
+        micSource.disconnect();
+        micSource = null;
+      }
+      if (micStream) {
+        micStream.getTracks().forEach((track) => track.stop());
+        micStream = null;
+      }
+    }
+
+    function simulateNoise() {
+      if (!isDemoPlaying) return;
+
+      const n = freqData.length;
+      const t = performance.now() * 0.003;
+      for (let i = 0; i < n; i++) {
+        const base = Math.sin(i * 0.1 - t * 2) * 0.4 + 0.6;
+        const kick = i < 5 ? Math.max(0, Math.sin(t * 4.5)) * 0.72 : 0;
+        const snare = i > 18 && i < 44 ? Math.max(0, Math.sin(t * 9.5 + 1.8)) * 0.25 : 0;
+        const highNoise = Math.random() * 0.25 * (i / n);
+        freqData[i] = Math.min(1, base + kick + snare + highNoise) * 230;
+      }
+
+      demoTimer = setTimeout(simulateNoise, 1000 / 60);
+    }
+
+    function renderLoop() {
+      requestAnimationFrame(renderLoop);
+
+      if (!isDemoPlaying && isMicActive && analyser) {
+        analyser.getByteFrequencyData(freqData);
+      } else if (!isDemoPlaying && !audioPlayer.paused && analyser) {
+        analyser.getByteFrequencyData(freqData);
+      } else if (!isDemoPlaying) {
+        for (let i = 0; i < freqData.length; i++) freqData[i] *= 0.86;
+      }
+
+      visualCtx.clearRect(0, 0, visualCanvas.width, visualCanvas.height);
+      visualCtx.fillStyle = "#05060a";
+      visualCtx.fillRect(0, 0, visualCanvas.width, visualCanvas.height);
+      drawEngine(visualCtx, visualCanvas.width, visualCanvas.height, freqData, currentEffectId, currentColor, currentVariant);
+    }
+
+    function getAvg(data, from, to) {
+      let sum = 0;
+      const start = Math.max(0, from);
+      const end = Math.min(data.length, to);
+      for (let i = start; i < end; i++) sum += data[i];
+      return end > start ? sum / (end - start) / 255 : 0;
+    }
+
+    function drawCurve(ctx, points) {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const mx = (points[i].x + points[i + 1].x) / 2;
+        const my = (points[i].y + points[i + 1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, mx, my);
+      }
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    }
+
+    function drawEngine(ctx, W, H, data, style, color, variant) {
+      ctx.save();
+      const cx = W * 0.5;
+      const cy = H * 0.5;
+      const n = data.length;
+      const fieldW = W * 0.85;
+      const x0 = cx - fieldW / 2;
+      const maxH = H * 0.35;
+      const sb = smoothBuffer;
+      const bass = getAvg(data, 0, 7);
+      const mids = getAvg(data, 10, 44);
+      const highs = getAvg(data, 48, 110);
+      const t = performance.now() * 0.001;
+      const variantIndex = Math.max(0, (VARIANTS[style] || ["Default"]).indexOf(variant));
+
+      if (style === "bars") {
+        const bars = variantIndex === 2 ? 84 : 48;
+        const bw = fieldW / bars;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = color;
+        ctx.fillStyle = color;
+        ctx.globalCompositeOperation = "lighter";
+
+        for (let i = 0; i < bars; i++) {
+          const rawVal = data[Math.floor((i / bars) * n)] / 255;
+          sb.bars[i] += (rawVal - sb.bars[i]) * (rawVal > sb.bars[i] ? 0.45 : 0.15);
+          const h = Math.max(4, sb.bars[i] * maxH * (variantIndex === 2 ? 0.8 : 1));
+          const x = x0 + i * bw;
+          const y = variantIndex === 1 ? cy : H * 0.75;
+
+          ctx.beginPath();
+          ctx.roundRect(x, y - h, bw * 0.68, variantIndex === 1 ? h * 2 : h, variantIndex === 1 ? bw * 0.28 : [6, 6, 0, 0]);
+          ctx.fill();
+
+          if (variantIndex === 0) {
+            ctx.save();
+            ctx.globalAlpha = 0.22;
+            ctx.beginPath();
+            ctx.roundRect(x, y + 3, bw * 0.68, h * 0.35, [0, 0, 6, 6]);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+      } else if (style === "mirror") {
+        const bars = variantIndex === 1 ? 64 : 42;
+        const bw = fieldW / bars;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = color;
+        ctx.fillStyle = color;
+        ctx.globalCompositeOperation = "lighter";
+
+        for (let i = 0; i < bars; i++) {
+          const rawVal = data[Math.floor((i / bars) * n)] / 255;
+          sb.mirror[i] += (rawVal - sb.mirror[i]) * (rawVal > sb.mirror[i] ? 0.42 : 0.15);
+          const h = Math.max(4, sb.mirror[i] * maxH * (variantIndex === 2 ? 0.82 : 0.6));
+          const x = x0 + i * bw;
+          ctx.beginPath();
+          ctx.roundRect(x, cy - h, bw * (variantIndex === 1 ? 0.25 : 0.65), h * 2, bw * 0.32);
+          ctx.fill();
+        }
+      } else if (style === "ribbon") {
+        const pts = variantIndex === 2 ? 30 : 18;
+        const points1 = [];
+        const points2 = [];
+        const drawY = H * 0.65;
+
+        for (let i = 0; i <= pts; i++) {
+          const rawVal = data[Math.floor((i / pts) * n)] / 255;
+          sb.ribbon1[i] += (rawVal - sb.ribbon1[i]) * 0.16;
+          sb.ribbon2[i] += (rawVal - sb.ribbon2[i]) * 0.08;
+          const drift = Math.sin(t * (variantIndex === 1 ? 3.4 : 2) + i * 0.65) * (variantIndex === 2 ? 9 : 20);
+          points1.push({ x: x0 + (i / pts) * fieldW, y: drawY - sb.ribbon1[i] * maxH + drift });
+          points2.push({ x: x0 + (i / pts) * fieldW, y: drawY - sb.ribbon2[i] * maxH * 0.75 - drift * 0.65 });
+        }
+
+        const grad = ctx.createLinearGradient(x0, drawY - maxH, x0, drawY);
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = variantIndex === 2 ? 0.08 : 0.25;
+        drawCurve(ctx, points2);
+        ctx.lineTo(x0 + fieldW, drawY);
+        ctx.lineTo(x0, drawY);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = variantIndex === 2 ? 2 : 5;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = color;
+        drawCurve(ctx, points1);
+        ctx.stroke();
+        if (variantIndex === 1) {
+          ctx.globalAlpha = 0.55;
+          ctx.lineWidth = 3;
+          drawCurve(ctx, points2);
+          ctx.stroke();
+        }
+      } else if (style === "blocks") {
+        const cols = variantIndex === 2 ? 22 : 16;
+        const rows = variantIndex === 1 ? 7 : 5;
+        const gap = 8;
+        const cellW = (fieldW - gap * (cols - 1)) / cols;
+        const cellH = H * 0.11;
+        const top = H * 0.22;
+        ctx.globalCompositeOperation = "lighter";
+        for (let y = 0; y < rows; y++) {
+          for (let x = 0; x < cols; x++) {
+            const idx = y * cols + x;
+            const rawVal = data[Math.floor((x / cols) * n)] / 255;
+            sb.blocks[idx] += (rawVal - sb.blocks[idx]) * 0.18;
+            const pulse = sb.blocks[idx] * (1 - y * 0.09);
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.08 + pulse * 0.86;
+            ctx.shadowBlur = pulse * 18;
+            ctx.shadowColor = color;
+            ctx.beginPath();
+            ctx.roundRect(
+              x0 + x * (cellW + gap),
+              top + y * (cellH + gap),
+              cellW,
+              Math.max(8, cellH * (0.35 + pulse * 0.8)),
+              6
+            );
+            ctx.fill();
+          }
+        }
+      } else if (style === "dots") {
+        const cols = variantIndex === 2 ? 48 : 32;
+        const rows = variantIndex === 2 ? 11 : 8;
+        const cw = fieldW / cols;
+        const rh = (maxH * 1.1) / rows;
+        const drawY = H * 0.8;
+
+        for (let x = 0; x < cols; x++) {
+          const rawVal = data[Math.floor((x / cols) * n)] / 255;
+          sb.matrix[x] += (rawVal - sb.matrix[x]) * 0.18;
+          const activeRows = Math.floor(sb.matrix[x] * rows);
+
+          for (let y = 0; y < rows; y++) {
+            if (y <= activeRows) {
+              ctx.fillStyle = color;
+              ctx.shadowBlur = 10;
+              ctx.shadowColor = color;
+              ctx.globalAlpha = 1 - (y / rows) * 0.4;
+            } else {
+              ctx.fillStyle = "rgba(255,255,255,0.035)";
+              ctx.shadowBlur = 0;
+              ctx.globalAlpha = 1;
+            }
+            ctx.beginPath();
+            const px = variantIndex === 1
+              ? cx + Math.cos((x / cols) * Math.PI * 2) * (H * 0.12 + y * rh * 0.9)
+              : x0 + x * cw + cw / 2;
+            const py = variantIndex === 1
+              ? cy + Math.sin((x / cols) * Math.PI * 2) * (H * 0.12 + y * rh * 0.9)
+              : drawY - y * rh;
+            ctx.arc(px, py, cw * (variantIndex === 2 ? 0.2 : 0.32), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      } else if (style === "radial") {
+        const bars = variantIndex === 2 ? 64 : 96;
+        const base = H * (variantIndex === 1 ? 0.23 : 0.17);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = color;
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = color;
+        ctx.lineCap = "round";
+
+        for (let i = 0; i < bars; i++) {
+          const rawVal = data[Math.floor((i / bars) * n)] / 255;
+          sb.radial[i] += (rawVal - sb.radial[i]) * 0.2;
+          const ang = (i / bars) * Math.PI * 2 + t * 0.18;
+          const len = 10 + sb.radial[i] * H * (variantIndex === 1 ? 0.06 : 0.16);
+          ctx.globalAlpha = 0.32 + sb.radial[i] * 0.68;
+          ctx.lineWidth = variantIndex === 2 ? 4 : 2 + sb.radial[i] * 3;
+          ctx.beginPath();
+          const inner = variantIndex === 1 ? base - len * 0.5 : base;
+          ctx.moveTo(cx + Math.cos(ang) * inner, cy + Math.sin(ang) * inner);
+          ctx.lineTo(cx + Math.cos(ang) * (base + len), cy + Math.sin(ang) * (base + len));
+          ctx.stroke();
+        }
+      } else if (style === "orbit") {
+        const rings = variantIndex === 1 ? 7 : 4;
+        sb.bass += (bass - sb.bass) * 0.16;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = color;
+        for (let r = 0; r < rings; r++) {
+          const radius = H * (0.12 + r * 0.075) + sb.bass * 34;
+          ctx.globalAlpha = 0.18 + r * 0.12;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, radius * 1.34, radius * 0.72, r * 0.34, 0, Math.PI * 2);
+          ctx.stroke();
+          for (let i = 0; i < (variantIndex === 2 ? 8 : 5); i++) {
+            const idx = (r * 13 + i * 9) % n;
+            const val = data[idx] / 255;
+            const a = t * (0.55 + r * 0.18) + i * Math.PI * 0.4 + r;
+            const x = cx + Math.cos(a) * radius * 1.34;
+            const y = cy + Math.sin(a) * radius * 0.72;
+            ctx.globalAlpha = 0.35 + val * 0.65;
+            ctx.beginPath();
+            ctx.arc(x, y, 5 + val * (variantIndex === 2 ? 7 : 14), 0, Math.PI * 2);
+            ctx.fill();
+            if (variantIndex === 2) {
+              ctx.globalAlpha = 0.18 + val * 0.25;
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+              ctx.lineTo(x - Math.cos(a) * 44, y - Math.sin(a) * 44);
+              ctx.stroke();
+            }
+          }
+        }
+      } else if (style === "particles") {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = color;
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = color;
+        sb.particles.forEach((p, i) => {
+          const band = data[i % n] / 255;
+          const pulse = variantIndex === 1 ? 0.75 + mids * 1.1 : 1 + bass * 1.7 + band * 0.85;
+          p.radius += p.speed * (variantIndex === 2 ? 0.9 + highs : 0.25 + bass);
+          if (p.radius > W * 0.42) p.radius = 24 + (i % 12) * 2;
+          const wobble = Math.sin(t * (variantIndex === 1 ? 4.8 : 1.2 + p.speed) + i) * (variantIndex === 1 ? 0.72 : 0.18);
+          const x = cx + Math.cos(p.angle + wobble) * p.radius * pulse;
+          const y = cy + Math.sin(p.angle + wobble) * p.radius * pulse;
+          ctx.globalAlpha = Math.max(0.08, 1 - p.radius / (W * 0.45));
+          ctx.beginPath();
+          ctx.arc(x, y, p.size + band * (variantIndex === 2 ? 1.4 : 3.5), 0, Math.PI * 2);
+          ctx.fill();
+        });
+      } else if (style === "glitch") {
+        sb.glitch += (Math.min(1, bass * 0.8 + highs * 1.1) - sb.glitch) * 0.2;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = color;
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = color;
+        const lines = variantIndex === 2 ? 18 : 34;
+        for (let i = 0; i < lines; i++) {
+          const y = H * 0.16 + (i / lines) * H * 0.68;
+          const val = data[Math.floor((i / lines) * n)] / 255;
+          const shift = Math.sin(t * 9 + i * 1.7) * fieldW * (variantIndex === 1 ? 0.18 : 0.08) * sb.glitch;
+          const len = fieldW * (0.12 + val * 0.78);
+          ctx.globalAlpha = 0.08 + val * 0.8;
+          ctx.fillRect(x0 + shift, y, variantIndex === 2 ? len * 0.28 : len, variantIndex === 2 ? 18 + val * 24 : 4 + val * 8);
+          if (val > 0.55 && variantIndex !== 2) ctx.fillRect(x0 + fieldW - len + shift * 0.5, y + 10, len * 0.42, 2);
+        }
+      } else if (style === "honeycomb") {
+        const hexR = variantIndex === 2 ? 18 : 28;
+        const dx = hexR * 1.75;
+        const dy = hexR * 1.5;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = color;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = color;
+        let cell = 0;
+        for (let row = 0; row < 8; row++) {
+          for (let col = 0; col < 13; col++) {
+            const x = x0 + col * dx + (row % 2) * dx * 0.5;
+            const y = H * 0.18 + row * dy;
+            if (x > x0 + fieldW || y > H * 0.88) continue;
+            const rawVal = data[Math.floor((col / 13) * n)] / 255;
+            sb.honeycomb[cell] += (rawVal - sb.honeycomb[cell]) * 0.18;
+            const val = sb.honeycomb[cell];
+            ctx.globalAlpha = 0.08 + val * 0.78;
+            ctx.lineWidth = 1 + val * 4;
+            ctx.beginPath();
+            for (let k = 0; k < 6; k++) {
+              const a = Math.PI / 6 + k * Math.PI / 3;
+              const px = x + Math.cos(a) * hexR * (0.72 + val * 0.28);
+              const py = y + Math.sin(a) * hexR * (0.72 + val * 0.28);
+              if (k === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            if (variantIndex === 1) {
+              ctx.fillStyle = color;
+              ctx.fill();
+            } else {
+              ctx.stroke();
+            }
+            cell++;
+          }
+        }
+      } else if (style === "level") {
+        const level = Math.min(1, bass * 1.25 + mids * 0.65 + highs * 0.25);
+        sb.level += (level - sb.level) * (level > sb.level ? 0.35 : 0.1);
+        const meters = variantIndex === 1 ? [
+          { label: "L", value: Math.min(1, bass * 0.9 + mids * 0.6) },
+          { label: "R", value: Math.min(1, bass * 0.75 + highs * 0.85) },
+        ] : [
+          { label: "LOW", value: bass },
+          { label: "MID", value: mids },
+          { label: "HIGH", value: highs },
+          { label: "RMS", value: sb.level },
+        ];
+        const rowH = variantIndex === 1 ? H * 0.2 : H * 0.13;
+        const startY = variantIndex === 1 ? H * 0.38 : H * 0.26;
+        ctx.font = "700 24px JetBrains Mono, monospace";
+        ctx.textBaseline = "middle";
+        meters.forEach((meter, i) => {
+          const y = startY + i * rowH;
+          const value = Math.min(1, meter.value);
+          ctx.fillStyle = "rgba(255,255,255,0.055)";
+          ctx.fillRect(x0 + 95, y - 18, fieldW - 130, 36);
+          const grad = ctx.createLinearGradient(x0 + 95, 0, x0 + fieldW - 35, 0);
+          grad.addColorStop(0, "#22c55e");
+          grad.addColorStop(0.7, "#facc15");
+          grad.addColorStop(1, "#ef4444");
+          ctx.fillStyle = grad;
+          ctx.shadowBlur = 14;
+          ctx.shadowColor = color;
+          if (variantIndex === 2) {
+            const segs = 34;
+            const sw = (fieldW - 130) / segs - 4;
+            for (let s = 0; s < segs * value; s++) ctx.fillRect(x0 + 95 + s * ((fieldW - 130) / segs), y - 18, sw, 36);
+          } else {
+            ctx.fillRect(x0 + 95, y - 18, (fieldW - 130) * value, 36);
+          }
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = "rgba(255,255,255,0.82)";
+          ctx.fillText(meter.label, x0, y);
+        });
+      } else if (style === "spectrumLine") {
+        const pts = variantIndex === 2 ? 64 : 96;
+        const baseY = H * 0.72;
+        const points = [];
+        for (let i = 0; i < pts; i++) {
+          const rawVal = data[Math.floor((i / pts) * n)] / 255;
+          sb.spectrumLine[i] += (rawVal - sb.spectrumLine[i]) * 0.2;
+          points.push({
+            x: x0 + (i / (pts - 1)) * fieldW,
+            y: baseY - sb.spectrumLine[i] * H * (variantIndex === 2 ? 0.34 : 0.46),
+          });
+        }
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = color;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = color;
+        ctx.lineWidth = 3;
+        if (variantIndex === 2) {
+          points.forEach((point) => {
+            ctx.beginPath();
+            ctx.moveTo(point.x, baseY);
+            ctx.lineTo(point.x, point.y);
+            ctx.stroke();
+          });
+        } else {
+          drawCurve(ctx, points);
+          ctx.stroke();
+        }
+        if (variantIndex === 1) {
+          ctx.globalAlpha = 0.55;
+          ctx.beginPath();
+          points.forEach((point, i) => {
+            const y = H - point.y;
+            if (i === 0) ctx.moveTo(point.x, y);
+            else ctx.lineTo(point.x, y);
+          });
+          ctx.stroke();
+        }
+        if (variantIndex === 2) {
+          ctx.restore();
+          return;
+        }
+        ctx.lineTo(x0 + fieldW, baseY);
+        ctx.lineTo(x0, baseY);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, H * 0.25, 0, baseY);
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = 0.18;
+        ctx.fill();
+      } else if (style === "vinyl") {
+        sb.vinyl += (bass - sb.vinyl) * 0.16;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = color;
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = color;
+        for (let i = 0; i < (variantIndex === 2 ? 28 : 18); i++) {
+          const r = H * (0.07 + i * 0.018) + sb.vinyl * 24;
+          const val = data[Math.floor((i / 18) * n)] / 255;
+          ctx.globalAlpha = 0.12 + val * 0.55;
+          ctx.lineWidth = 1 + val * 3;
+          ctx.beginPath();
+          if (variantIndex === 2) {
+            ctx.arc(cx, cy, r, -Math.PI * 0.35, Math.PI * 0.35);
+          } else {
+            ctx.arc(cx, cy, r, t * (0.5 + i * 0.02), Math.PI * 2 + t * (0.5 + i * 0.02));
+          }
+          ctx.stroke();
+        }
+        if (variantIndex === 1) {
+          ctx.fillStyle = "rgba(255,255,255,0.04)";
+          ctx.beginPath();
+          ctx.arc(cx, cy, H * 0.24 + sb.vinyl * 22, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 18 + sb.vinyl * 18, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (style === "rain") {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = color;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = color;
+        ctx.lineCap = "round";
+        sb.rainDrops.forEach((drop, i) => {
+          const val = data[(i * 3) % n] / 255;
+          drop.y += drop.speed * (variantIndex === 2 ? 2.6 + highs * 3.4 : 0.75 + highs * 2.2 + val);
+          if (drop.y > 1.08) {
+            drop.y = -0.08;
+            drop.x = (drop.x + 0.381 + bass * 0.07) % 1;
+          }
+          const x = x0 + drop.x * fieldW;
+          const y = drop.y * H;
+          ctx.globalAlpha = 0.12 + val * 0.75;
+          ctx.lineWidth = 1.5 + val * 5;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          const dx = variantIndex === 1 ? 0 : -18 - val * 32;
+          const dy = variantIndex === 2 ? 8 + val * 16 : drop.len + val * 44;
+          ctx.lineTo(x + dx, y + dy);
+          ctx.stroke();
+        });
+      } else if (style === "peak") {
+        const cols = 28;
+        const bw = fieldW / cols;
+        const baseY = H * 0.78;
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < cols; i++) {
+          const rawVal = data[Math.floor((i / cols) * n)] / 255;
+          sb.peak[i] += (rawVal - sb.peak[i]) * (rawVal > sb.peak[i] ? 0.5 : 0.12);
+          sb.peakHold[i] = Math.max(sb.peakHold[i] - 0.006, sb.peak[i]);
+          const h = sb.peak[i] * H * 0.48;
+          const peakY = baseY - sb.peakHold[i] * H * 0.48;
+          const x = x0 + i * bw;
+          ctx.fillStyle = color;
+          ctx.shadowBlur = 14;
+          ctx.shadowColor = color;
+          ctx.globalAlpha = 0.82;
+          if (variantIndex === 2) {
+            const y = H * 0.22 + i * (H * 0.56 / cols);
+            ctx.fillRect(x0, y, fieldW * sb.peak[i], H * 0.56 / cols * 0.52);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(x0 + fieldW * sb.peakHold[i], y, 6, H * 0.56 / cols * 0.52);
+            continue;
+          }
+          if (variantIndex === 1) {
+            const segs = 14;
+            const sh = h / segs - 3;
+            for (let s = 0; s < segs * sb.peak[i]; s++) {
+              ctx.fillRect(x, baseY - s * (h / segs) - sh, bw * 0.55, sh);
+            }
+          } else {
+            ctx.fillRect(x, baseY - h, bw * 0.55, h);
+          }
+          ctx.fillStyle = "#ffffff";
+          ctx.globalAlpha = 0.9;
+          ctx.fillRect(x, peakY, bw * 0.55, 5);
+        }
+      }
+
+      ctx.restore();
+    }
+
+    renderLoop();
+  </script>
+</body>
+</html>
