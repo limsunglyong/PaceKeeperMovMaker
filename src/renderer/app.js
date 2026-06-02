@@ -79,6 +79,8 @@
     name: "Untitled",
     video: null,
     audio: null,
+    videoClips: [],
+    audioClips: [],
     videoTrackId: "video",
     audioTrackId: "audio",
     trim: { start: 0, end: 0 },
@@ -89,7 +91,7 @@
     viz: { enabled: true, style: "bars", x: 0.5, y: 0.78, scale: 0.85, opacity: 0.92, color: "#2dd4bf" },
     bpm: 0,
     bpmSections: [],
-    bpmOv: { enabled: true, x: 0.88, y: 0.13, color: "#ff4d5e", offset: 0, imageSet: "color", showIcon: true, showLabel: true, showNumber: false },
+    bpmOv: { enabled: false, x: 0.88, y: 0.13, color: "#ff4d5e", offset: 0, imageSet: "color", showIcon: true, showLabel: true, showNumber: false },
     subtitleFx: { effect: "none", shadow: true, background: false, align: "center" },
     tracks: defaultTracks(),
     subs: [],
@@ -114,6 +116,10 @@
     clock: { t0: 0, perf0: 0 },
     videoBlob: null,
     audioBlob: null,
+    videoBlobs: {},
+    audioBlobs: {},
+    activeVideoClipId: null,
+    activeAudioClipId: null,
     tap: [],
     waveCanvas: null,
     bpmImages: {}
@@ -121,10 +127,65 @@
 
   function setStatus(text) { el.status.textContent = text; }
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+  function mediaClips(type) { return type === "video" ? state.videoClips : state.audioClips; }
+  function primaryClip(type) {
+    const clips = mediaClips(type);
+    const trackId = type === "video" ? state.videoTrackId : state.audioTrackId;
+    return clips.find((clip) => clip.trackId === trackId) || clips[0] || null;
+  }
+  function syncLegacyMediaState() {
+    const video = primaryClip("video");
+    const audio = primaryClip("audio");
+    state.video = video;
+    state.audio = audio;
+    state.videoOffset = video ? video.start : 0;
+    state.audioOffset = audio ? audio.start : 0;
+    state.trim = video ? { start: video.trimStart || 0, end: video.trimEnd ?? video.duration ?? 0 } : { start: 0, end: 0 };
+  }
+  function clipDuration(clip) {
+    if (!clip) return 0;
+    if (clip.type === "video") return Math.max(0, (clip.trimEnd ?? clip.duration ?? 0) - (clip.trimStart || 0));
+    return Math.max(0, clip.duration || 0);
+  }
+  function clipLocalTime(clip, t) { return t - (clip ? clip.start || 0 : 0); }
+  function trackOrderIndex(trackId) {
+    const index = state.tracks.findIndex((track) => track.id === trackId);
+    return index < 0 ? 9999 : index;
+  }
+  function activeClipAt(type, t) {
+    return mediaClips(type)
+      .filter((clip) => {
+        const local = clipLocalTime(clip, t);
+        return local >= 0 && local <= clipDuration(clip);
+      })
+      .sort((a, b) => trackOrderIndex(a.trackId) - trackOrderIndex(b.trackId))[0] || null;
+  }
+  function selectedClipForTrack(type, trackId) {
+    return mediaClips(type).find((clip) => clip.trackId === trackId && state.time >= clip.start && state.time <= clip.start + clipDuration(clip))
+      || mediaClips(type).find((clip) => clip.trackId === trackId)
+      || null;
+  }
+  function resolveImportStart(type, trackId, newDuration) {
+    const clips = mediaClips(type)
+      .filter((clip) => clip.trackId === trackId)
+      .sort((a, b) => (a.start || 0) - (b.start || 0));
+    const playhead = state.time;
+    const containing = clips.find((clip) => playhead >= (clip.start || 0) && playhead <= (clip.start || 0) + clipDuration(clip));
+    let start = containing ? (containing.start || 0) + clipDuration(containing) : playhead;
+    let cursorEnd = start + Math.max(0, newDuration || 0);
+    clips.forEach((clip) => {
+      const clipStart = clip.start || 0;
+      const clipEnd = clipStart + clipDuration(clip);
+      if (clipEnd <= start || clipStart >= cursorEnd) return;
+      clip.start = cursorEnd;
+      cursorEnd = clip.start + clipDuration(clip);
+    });
+    return start;
+  }
   function duration() {
     return Math.max(
-      state.video ? state.videoOffset + trimDuration() : 0,
-      state.audio ? state.audioOffset + state.audio.duration : 0,
+      ...state.videoClips.map((clip) => (clip.start || 0) + clipDuration(clip)),
+      ...state.audioClips.map((clip) => (clip.start || 0) + clipDuration(clip)),
       ...state.subs.map((sub) => sub.end || 0),
       0
     );
@@ -193,16 +254,51 @@
       state.subs.forEach((sub) => { if (sub.trackId === removeId) sub.trackId = fallback.id; });
       setStatus("Removed overlay track. Existing items moved to the next overlay track.");
     } else {
+      const removedClipCount = track.type === "video"
+        ? state.videoClips.filter((clip) => clip.trackId === removeId).length
+        : state.audioClips.filter((clip) => clip.trackId === removeId).length;
+      const removedAudioClipIds = track.type === "audio" ? state.audioClips.filter((clip) => clip.trackId === removeId).map((clip) => clip.id) : [];
+      if (track.type === "video") state.videoClips = state.videoClips.filter((clip) => clip.trackId !== removeId);
+      if (track.type === "audio") state.audioClips = state.audioClips.filter((clip) => clip.trackId !== removeId);
+      if (removedAudioClipIds.length) state.subs = state.subs.filter((sub) => !(sub.source && removedAudioClipIds.includes(sub.source.audioClipId)));
       if (track.type === "video" && state.videoTrackId === removeId) {
         state.videoTrackId = state.tracks.find((item) => item.type === "video" && item.id !== removeId)?.id || "video";
       }
       if (track.type === "audio" && state.audioTrackId === removeId) {
         state.audioTrackId = state.tracks.find((item) => item.type === "audio" && item.id !== removeId)?.id || "audio";
       }
-      setStatus(`Removed ${track.type} track.`);
+      setStatus(`Removed ${track.type} track with ${removedClipCount} clip(s).`);
     }
     state.tracks = state.tracks.filter((item) => item.id !== removeId);
     if (state.selected === removeId) state.selected = null;
+    return true;
+  }
+  function removeMediaClipById(clipId) {
+    const videoClip = state.videoClips.find((clip) => clip.id === clipId);
+    const audioClip = state.audioClips.find((clip) => clip.id === clipId);
+    const clip = videoClip || audioClip;
+    if (!clip) return false;
+    if (videoClip) {
+      state.videoClips = state.videoClips.filter((item) => item.id !== clipId);
+      delete refs.videoBlobs[clipId];
+      if (refs.activeVideoClipId === clipId) {
+        refs.activeVideoClipId = null;
+        el.video.pause();
+        el.video.removeAttribute("src");
+      }
+    } else {
+      state.audioClips = state.audioClips.filter((item) => item.id !== clipId);
+      state.subs = state.subs.filter((sub) => !(sub.source && sub.source.audioClipId === clipId));
+      delete refs.audioBlobs[clipId];
+      if (refs.activeAudioClipId === clipId) {
+        refs.activeAudioClipId = null;
+        el.audio.pause();
+        el.audio.removeAttribute("src");
+      }
+    }
+    if (state.selected === clip.trackId) state.selected = clip.trackId;
+    syncLegacyMediaState();
+    setStatus(`Removed ${clip.type} clip "${clip.name}".`);
     return true;
   }
   function codeForTrack(index) {
@@ -245,16 +341,19 @@
     return BPM_LEVELS.find((level) => value >= level.min && value <= level.max) || BPM_LEVELS[0];
   }
   function bpmSectionAt(time) {
-    const local = state.audio ? audioLocalTime(time) : time;
-    const sections = state.bpmSections || [];
+    const audio = activeClipAt("audio", time) || primaryClip("audio");
+    const local = audio ? clipLocalTime(audio, time) : time;
+    const sections = audio && audio.bpmSections && audio.bpmSections.length ? audio.bpmSections : (state.bpmSections || []);
+    const bpm = audio && audio.bpm ? audio.bpm : state.bpm;
     const found = sections.find((section) => local >= section.start && local < section.end);
     if (found) return found;
     if (sections.length && local >= sections[sections.length - 1].end) return sections[sections.length - 1];
-    return state.bpm > 0 ? { start: 0, end: duration(), bpm: state.bpm } : null;
+    return bpm > 0 ? { start: 0, end: audio ? audio.duration : duration(), bpm } : null;
   }
   function currentBpmAt(time) {
     const section = bpmSectionAt(time);
-    return section && section.bpm > 0 ? section.bpm : state.bpm;
+    const audio = activeClipAt("audio", time) || primaryClip("audio");
+    return section && section.bpm > 0 ? section.bpm : audio && audio.bpm ? audio.bpm : state.bpm;
   }
   function fmtTC(t, frames) {
     if (!Number.isFinite(t) || t < 0) t = 0;
@@ -456,13 +555,46 @@
   function detectBPM(buffer) {
     return detectBPMInRange(buffer.getChannelData(0), buffer.sampleRate, 0, buffer.duration);
   }
+  function sectionLevel(section) {
+    return bpmLevelFor(section.bpm).id;
+  }
+  function mergeShortBpmSections(sections, minSec) {
+    if (sections.length <= 1) return sections;
+    const out = sections.map((section) => ({ ...section }));
+    let changed = true;
+    while (changed && out.length > 1) {
+      changed = false;
+      for (let i = 0; i < out.length; i++) {
+        const current = out[i];
+        const len = current.end - current.start;
+        if (len >= minSec) continue;
+        const prev = out[i - 1];
+        const next = out[i + 1];
+        const prevSameLevel = prev && sectionLevel(prev) === sectionLevel(current);
+        const nextSameLevel = next && sectionLevel(next) === sectionLevel(current);
+        if (!prevSameLevel && !nextSameLevel && len >= Math.min(3, minSec)) continue;
+        const targetIndex = prev && next
+          ? (Math.abs(prev.bpm - current.bpm) <= Math.abs(next.bpm - current.bpm) ? i - 1 : i + 1)
+          : (prev ? i - 1 : i + 1);
+        const target = out[targetIndex];
+        const totalLen = Math.max(0.001, (target.end - target.start) + len);
+        target.bpm = Math.round((target.bpm * (target.end - target.start) + current.bpm * len) / totalLen);
+        if (targetIndex < i) target.end = current.end;
+        else target.start = current.start;
+        out.splice(i, 1);
+        changed = true;
+        break;
+      }
+    }
+    return out;
+  }
   function detectBPMSections(buffer) {
     const ch = buffer.getChannelData(0);
     const sr = buffer.sampleRate;
     const dur = buffer.duration;
     if (!dur || dur < 4) return [];
-    const windowSec = dur < 24 ? dur : 16;
-    const hopSec = dur < 24 ? dur : 8;
+    const windowSec = dur < 12 ? dur : Math.min(8, Math.max(6, dur / 8));
+    const hopSec = dur < 12 ? dur : Math.max(1.5, windowSec / 4);
     const windows = [];
     for (let start = 0; start < dur; start += hopSec) {
       const end = Math.min(dur, start + windowSec);
@@ -488,7 +620,9 @@
     segments.forEach((win) => {
       const last = merged[merged.length - 1];
       const level = bpmLevelFor(win.bpm).id;
-      if (last && (Math.abs(last.bpm - win.bpm) <= 3 || bpmLevelFor(last.bpm).id === level)) {
+      const sameLevel = last && bpmLevelFor(last.bpm).id === level;
+      const closeTempo = last && Math.abs(last.bpm - win.bpm) <= 3;
+      if (last && (closeTempo || sameLevel)) {
         const lastLen = last.end - last.start;
         const winLen = win.end - win.start;
         last.bpm = Math.round((last.bpm * lastLen + win.bpm * winLen) / Math.max(0.001, lastLen + winLen));
@@ -499,7 +633,10 @@
     });
     merged[0].start = 0;
     merged[merged.length - 1].end = dur;
-    return merged.map((section) => ({
+    const cleaned = mergeShortBpmSections(merged, Math.min(4, Math.max(2.5, dur / 18)));
+    cleaned[0].start = 0;
+    cleaned[cleaned.length - 1].end = dur;
+    return cleaned.map((section) => ({
       start: Number(section.start.toFixed(2)),
       end: Number(section.end.toFixed(2)),
       bpm: Math.round(section.bpm)
@@ -508,6 +645,8 @@
 
   function renderFrame(t) {
     const fx = state.subtitleFx;
+    const videoClip = activeClipAt("video", t);
+    const audioClip = activeClipAt("audio", t) || primaryClip("audio");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
@@ -517,8 +656,9 @@
     ctx.clearRect(0, 0, CW, CH);
     ctx.fillStyle = "#05060a";
     ctx.fillRect(0, 0, CW, CH);
-    const videoActive = state.video && videoLocalTime(t) >= 0 && videoLocalTime(t) <= trimDuration();
-    if (videoActive && el.video.readyState >= 2) {
+    if (videoClip) attachVideoClip(videoClip);
+    const videoActive = videoClip && el.video.readyState >= 2;
+    if (videoActive) {
       drawContain(el.video);
     } else {
       ctx.save();
@@ -532,9 +672,9 @@
       ctx.restore();
     }
 
-    const audioLocal = state.audio ? audioLocalTime(t) : 0;
-    const audioActive = state.audio && audioLocal >= 0 && audioLocal <= state.audio.duration;
-    if (state.viz.enabled && state.audio && audioActive) {
+    const audioLocal = audioClip ? clipLocalTime(audioClip, t) : 0;
+    const audioActive = audioClip && audioLocal >= 0 && audioLocal <= audioClip.duration;
+    if (state.viz.enabled && audioClip && audioActive) {
       if (state.playing && refs.analyser) refs.analyser.getByteFrequencyData(refs.freq);
       else staticSpectrum(audioLocal, refs.freq);
       drawViz(refs.freq);
@@ -558,9 +698,10 @@
   }
   function staticSpectrum(t, out) {
     let amp = 0.25;
-    if (state.audio && state.audio.peaks) {
-      const i = Math.floor((t / state.audio.duration) * (state.audio.peaks.maxs.length - 1));
-      amp = Math.min(1, Math.abs(state.audio.peaks.maxs[clamp(i, 0, state.audio.peaks.maxs.length - 1)]) * 1.4 + 0.12);
+    const audio = primaryClip("audio");
+    if (audio && audio.peaks) {
+      const i = Math.floor((t / audio.duration) * (audio.peaks.maxs.length - 1));
+      amp = Math.min(1, Math.abs(audio.peaks.maxs[clamp(i, 0, audio.peaks.maxs.length - 1)]) * 1.4 + 0.12);
     }
     for (let i = 0; i < out.length; i++) {
       const fall = Math.pow(1 - i / out.length, 0.7);
@@ -637,7 +778,8 @@
     if (!bpm || bpm <= 0) return;
     const activeLevel = bpmLevelFor(bpm);
     const interval = 60 / bpm;
-    const phase = ((t - state.audioOffset - cfg.offset) % interval + interval) % interval;
+    const audio = primaryClip("audio");
+    const phase = ((t - (audio ? audio.start : 0) - cfg.offset) % interval + interval) % interval;
     const pulse = Math.max(0, 1 - phase / interval * 3.2);
     const cx = cfg.x * CW;
     const cy = cfg.y * CH;
@@ -761,6 +903,7 @@
       selected: state.selected,
       subtitleCount: state.subs.length,
       activeSubtitles: activeSubs.map((s) => ({ id: s.id, type: s.type, text: s.text, start: s.start, end: s.end, x: s.x, y: s.y, size: s.size, color: s.color, background: s.background })),
+      bpmSections: (state.bpmSections || []).map((section) => ({ start: section.start, end: section.end, bpm: section.bpm, level: bpmLevelFor(section.bpm).id })),
       canvas: { width: el.stage.width, height: el.stage.height }
     };
   }
@@ -773,21 +916,36 @@
     el.playhead.style.left = `${state.time * state.pxPerSec}px`;
     if (state.exporting) el.export.textContent = `Export ${Math.round((duration() ? state.time / duration() : 0) * 100)}%`;
   }
+  function attachVideoClip(clip) {
+    if (!clip || refs.activeVideoClipId === clip.id) return;
+    refs.activeVideoClipId = clip.id;
+    el.video.src = clip.url;
+  }
+  function attachAudioClip(clip) {
+    if (!clip || refs.activeAudioClipId === clip.id) return;
+    refs.activeAudioClipId = clip.id;
+    el.audio.src = clip.url;
+    applyAudioSettings();
+  }
   function syncMedia(t) {
-    if (state.video) {
-      const local = videoLocalTime(t);
-      const active = local >= 0 && local <= trimDuration();
-      const want = state.trim.start + clamp(local, 0, trimDuration());
+    const videoClip = activeClipAt("video", t) || primaryClip("video");
+    if (videoClip) {
+      attachVideoClip(videoClip);
+      const local = clipLocalTime(videoClip, t);
+      const active = local >= 0 && local <= clipDuration(videoClip);
+      const want = (videoClip.trimStart || 0) + clamp(local, 0, clipDuration(videoClip));
       if (Math.abs(el.video.currentTime - want) > 0.12) {
         try { el.video.currentTime = want; } catch (_) {}
       }
       if (state.playing && active && el.video.paused) el.video.play().catch(() => {});
       if ((!active || !state.playing) && !el.video.paused) el.video.pause();
     }
-    if (state.audio) {
-      const local = audioLocalTime(t);
-      const active = local >= 0 && local <= state.audio.duration;
-      const want = clamp(local, 0, state.audio.duration);
+    const audioClip = activeClipAt("audio", t) || primaryClip("audio");
+    if (audioClip) {
+      attachAudioClip(audioClip);
+      const local = clipLocalTime(audioClip, t);
+      const active = local >= 0 && local <= audioClip.duration;
+      const want = clamp(local, 0, audioClip.duration);
       if (Math.abs(el.audio.currentTime - want) > 0.12) {
         try { el.audio.currentTime = want; } catch (_) {}
       }
@@ -846,29 +1004,94 @@
     refs.raf = requestAnimationFrame(loop);
   }
 
-  async function loadVideo(file, trackId) {
-    refs.videoBlob = file;
+  async function fileFromOpenResult(result) {
+    const response = await fetch(result.url);
+    const blob = await response.blob();
+    return new File([blob], result.name, { type: blob.type || "" });
+  }
+  async function importVideoFromDialog() {
+    if (!window.pacekeeper || !window.pacekeeper.openMediaFile) {
+      el.videoInput.click();
+      return;
+    }
+    try {
+      const result = await window.pacekeeper.openMediaFile("video");
+      if (result.canceled) return;
+      await loadVideo(await fileFromOpenResult(result), activeMediaTrackId("video"), result.path);
+    } catch (_) {
+      el.videoInput.click();
+    }
+  }
+  async function importAudioFromDialog() {
+    if (!window.pacekeeper || !window.pacekeeper.openMediaFile) {
+      el.audioInput.click();
+      return;
+    }
+    try {
+      const result = await window.pacekeeper.openMediaFile("audio");
+      if (result.canceled) return;
+      await loadAudio(await fileFromOpenResult(result), true, activeMediaTrackId("audio"), result.path);
+    } catch (_) {
+      el.audioInput.click();
+    }
+  }
+  async function importLogoFromDialog() {
+    if (!window.pacekeeper || !window.pacekeeper.openImageFile) {
+      el.logoInput.click();
+      return;
+    }
+    try {
+      const result = await window.pacekeeper.openImageFile();
+      if (result.canceled) return;
+      addLogo(await fileFromOpenResult(result), result.path);
+    } catch (_) {
+      el.logoInput.click();
+    }
+  }
+
+  async function loadVideo(file, trackId, sourcePath) {
     const url = URL.createObjectURL(file);
     el.video.src = url;
     await new Promise((resolve) => { el.video.onloadedmetadata = resolve; });
-    state.videoTrackId = trackId || activeMediaTrackId("video");
-    state.video = { name: file.name, url, duration: el.video.duration || 0, thumbs: [] };
-    state.trim = { start: 0, end: state.video.duration };
-    state.videoOffset = 0;
-    state.time = 0;
+    const targetTrackId = trackId || activeMediaTrackId("video");
+    const sourceDuration = el.video.duration || 0;
+    const start = resolveImportStart("video", targetTrackId, sourceDuration);
+    const clip = {
+      id: `v${Date.now()}`,
+      type: "video",
+      trackId: targetTrackId,
+      name: file.name,
+      url,
+      duration: sourceDuration,
+      start,
+      trimStart: 0,
+      trimEnd: sourceDuration,
+      volume: state.videoAudio.volume,
+      muted: state.videoAudio.muted,
+      thumbs: [],
+      blob: file,
+      sourcePath: sourcePath || ""
+    };
+    refs.videoBlob = file;
+    refs.videoBlobs[clip.id] = file;
+    refs.activeVideoClipId = clip.id;
+    state.videoTrackId = targetTrackId;
+    state.videoClips.push(clip);
+    syncLegacyMediaState();
     state.selected = state.videoTrackId;
-    setStatus(`Loaded video "${file.name}" on ${state.tracks.find((track) => track.id === state.videoTrackId)?.label || "Video"}.`);
+    setStatus(`Loaded video "${file.name}" on ${state.tracks.find((track) => track.id === state.videoTrackId)?.label || "Video"} at ${fmtTC(clip.start, false)}.`);
     refresh();
     try {
       setStatus(`Generating thumbnails for "${file.name}"...`);
-      state.video.thumbs = await captureVideoThumbnails(url, state.video.duration);
-      setStatus(`Loaded video "${file.name}" with ${state.video.thumbs.length} timeline thumbnails.`);
+      clip.thumbs = await captureVideoThumbnails(url, clip.duration);
+      syncLegacyMediaState();
+      setStatus(`Loaded video "${file.name}" with ${clip.thumbs.length} timeline thumbnails.`);
       refresh();
     } catch (_) {
       setStatus(`Loaded video "${file.name}". Thumbnail generation was skipped.`);
     }
   }
-  async function loadAudio(file, detect, trackId) {
+  async function loadAudio(file, detect, trackId, sourcePath) {
     setStatus("Decoding audio...");
     const buffer = await decodeAudio(file);
     refs.audioBlob = file;
@@ -886,23 +1109,49 @@
       refs.analyser.connect(refs.audioCtx.destination);
     }
     applyAudioSettings();
-    state.audioTrackId = trackId || activeMediaTrackId("audio");
-    state.audio = { name: file.name, url, duration: buffer.duration, peaks };
-    state.audioOffset = 0;
+    const targetTrackId = trackId || activeMediaTrackId("audio");
+    const start = resolveImportStart("audio", targetTrackId, buffer.duration);
+    const clip = {
+      id: `a${Date.now()}`,
+      type: "audio",
+      trackId: targetTrackId,
+      name: file.name,
+      url,
+      duration: buffer.duration,
+      start,
+      trimStart: 0,
+      trimEnd: buffer.duration,
+      volume: state.musicAudio.volume,
+      muted: state.musicAudio.muted,
+      peaks,
+      blob: file,
+      sourcePath: sourcePath || "",
+      bpm: 0,
+      bpmSections: []
+    };
+    refs.audioBlobs[clip.id] = file;
+    refs.activeAudioClipId = clip.id;
+    state.audioTrackId = targetTrackId;
+    state.audioClips.push(clip);
+    syncLegacyMediaState();
     state.selected = state.audioTrackId;
     if (detect) {
-      state.bpmSections = detectBPMSections(buffer);
-      if (state.bpmSections.length) {
-        const total = state.bpmSections.reduce((sum, section) => sum + section.bpm * Math.max(0.001, section.end - section.start), 0);
-        const len = state.bpmSections.reduce((sum, section) => sum + Math.max(0.001, section.end - section.start), 0);
-        state.bpm = Math.round(total / len);
+      clip.bpmSections = detectBPMSections(buffer);
+      if (clip.bpmSections.length) {
+        const total = clip.bpmSections.reduce((sum, section) => sum + section.bpm * Math.max(0.001, section.end - section.start), 0);
+        const len = clip.bpmSections.reduce((sum, section) => sum + Math.max(0.001, section.end - section.start), 0);
+        clip.bpm = Math.round(total / len);
       } else {
-        state.bpm = detectBPM(buffer);
+        clip.bpm = detectBPM(buffer);
       }
+      state.bpmSections = clip.bpmSections;
+      state.bpm = clip.bpm;
+      state.bpmOv.enabled = false;
       el.bpmInput.value = String(state.bpm);
-      setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"}. Detected about ${state.bpm} BPM across ${Math.max(1, state.bpmSections.length)} section(s).`);
+      generateBpmLogoOverlay({ silent: true, audioClip: clip });
+      setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"} at ${fmtTC(clip.start, false)}. Detected about ${clip.bpm} BPM across ${Math.max(1, clip.bpmSections.length)} section(s).`);
     } else {
-      setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"}.`);
+      setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"} at ${fmtTC(clip.start, false)}.`);
     }
     refresh();
   }
@@ -916,19 +1165,113 @@
     syncMedia(state.time);
     refresh();
   }
-  function addLogo(file) {
+  function addLogo(file, sourcePath) {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       const id = `s${Date.now()}`;
       const start = state.time;
-      state.subs.push(normalizeSubtitle({ id, type: "logo", text: file.name, start, end: start + 6, trackId: activeOverlayTrackId(), x: 0.5, y: 0.18, size: 0.22, color: "#fff", url, img, blob: file }));
+      state.subs.push(normalizeSubtitle({ id, type: "logo", text: file.name, start, end: start + 6, trackId: activeOverlayTrackId(), x: 0.5, y: 0.18, size: 0.22, color: "#fff", url, img, blob: file, sourcePath: sourcePath || "" }));
       state.selected = id;
       state.time = start;
       syncMedia(state.time);
       refresh();
     };
     img.src = url;
+  }
+  function bpmLogoSections(audioClip) {
+    const audio = audioClip || primaryClip("audio");
+    const sections = audio && audio.bpmSections && audio.bpmSections.length ? audio.bpmSections : (state.bpmSections || []);
+    const bpm = audio && audio.bpm ? audio.bpm : state.bpm;
+    if (sections.length) {
+      return sections.map((section) => ({
+        start: (audio ? audio.start : 0) + section.start,
+        end: (audio ? audio.start : 0) + section.end,
+        bpm: section.bpm,
+        audioClipId: audio ? audio.id : ""
+      }));
+    }
+    if (bpm > 0) {
+      const start = audio ? audio.start : 0;
+      const end = audio ? audio.start + audio.duration : duration();
+      return [{ start, end, bpm, audioClipId: audio ? audio.id : "" }];
+    }
+    return [];
+  }
+  function bpmLogoTrackId() {
+    const existing = state.tracks.find((track) => track.type === "overlay" && track.label === "BPM Logo");
+    if (existing) return existing.id;
+    const id = addOverlayTrack("BPM Logo");
+    const track = state.tracks.find((item) => item.id === id);
+    if (track) track.color = "#ffb020";
+    return id;
+  }
+  function generateBpmLogoOverlay(options) {
+    options = options || {};
+    const previousSelected = state.selected;
+    const audioClip = options.audioClip || primaryClip("audio");
+    const audioClipId = audioClip ? audioClip.id : "";
+    const sections = bpmLogoSections(audioClip).filter((section) => section.bpm > 0 && section.end > section.start);
+    if (!sections.length) {
+      if (!options.silent) setStatus("Import audio or set BPM before creating BPM Logo overlay.");
+      return;
+    }
+    const trackId = bpmLogoTrackId();
+    state.subs = state.subs.filter((sub) => !(sub.source && sub.source.kind === "bpm-logo" && (sub.source.audioClipId || "") === audioClipId));
+    sections.forEach((section, index) => {
+      const baseId = `bpm-logo-${Date.now()}-${index}`;
+      const count = sections.length;
+      const spacing = count > 1 ? Math.min(0.08, 0.72 / Math.max(1, count - 1)) : 0;
+      const totalWidth = spacing * Math.max(0, count - 1);
+      const startX = count > 1 ? clamp(state.bpmOv.x - totalWidth / 2, 0.04, 0.96 - totalWidth) : state.bpmOv.x;
+      const iconSize = count > 6 ? 0.052 : count > 4 ? 0.058 : 0.065;
+      const activeIconSize = iconSize + 0.01;
+      const labelSize = count > 6 ? 16 : count > 4 ? 18 : 20;
+      const activeLabelSize = labelSize + 3;
+      sections.forEach((displaySection, displayIndex) => {
+        const item = bpmLevelFor(displaySection.bpm);
+        const active = displayIndex === index;
+        const iconUrl = BPM_IMAGE_PRESETS[active ? "color" : "gray"][item.id];
+        const icon = new Image();
+        icon.src = iconUrl;
+        const x = clamp(startX + spacing * displayIndex, 0.04, 0.96);
+        const label = active && state.bpmOv.showNumber ? `${item.label} ${displaySection.bpm}` : item.label;
+        state.subs.push(normalizeSubtitle({
+          id: `${baseId}-section-${displayIndex}-icon`,
+          type: "logo",
+          text: `${item.label} icon`,
+          trackId,
+          start: section.start,
+          end: section.end,
+          x,
+          y: state.bpmOv.y,
+          size: active ? activeIconSize : iconSize,
+          color: active ? state.bpmOv.color : "rgba(255,255,255,.45)",
+          url: iconUrl,
+          img: icon,
+          source: { kind: "bpm-logo", role: "icon", audioClipId, bpm: displaySection.bpm, paceLevel: item.id, active, sectionIndex: displayIndex, activeSectionIndex: index }
+        }));
+        state.subs.push(normalizeSubtitle({
+          id: `${baseId}-section-${displayIndex}-label`,
+          type: "text",
+          text: label,
+          trackId,
+          start: section.start,
+          end: section.end,
+          x,
+          y: Math.min(0.96, state.bpmOv.y + 0.08),
+          size: active ? activeLabelSize : labelSize,
+          color: active ? state.bpmOv.color : "rgba(255,255,255,.48)",
+          background: false,
+          fontWeight: active ? "500" : "400",
+          source: { kind: "bpm-logo", role: "label", audioClipId, bpm: displaySection.bpm, paceLevel: item.id, active, sectionIndex: displayIndex, activeSectionIndex: index }
+        }));
+      });
+    });
+    state.bpmOv.enabled = false;
+    state.selected = options.silent ? previousSelected : trackId;
+    if (!options.silent) setStatus(`Created BPM Logo overlay track with ${sections.length} section(s).`);
+    if (!options.silent) refresh();
   }
   function updateSub(id, patch) {
     const s = state.subs.find((item) => item.id === id);
@@ -941,28 +1284,32 @@
     const sub = state.subs.find((s) => s.id === selected);
     const selectedTrack = state.tracks.find((track) => track.id === selected);
     if (selectedTrack && selectedTrack.type === "video") {
+      const clip = selectedClipForTrack("video", selectedTrack.id);
       el.inspector.innerHTML = `
         <div class="section"><h3>Video Track</h3></div>
         ${selectedTrack.locked ? "" : textRow("Name", "track.label", selectedTrack.label)}
         ${checkboxRow("Mute clip audio", "videoAudio.muted", state.videoAudio.muted)}
         ${slider("Clip audio volume","videoAudio.volume",state.videoAudio.volume,0,1,.01,"%")}
-        ${numberRow("Timeline start","videoOffset",state.videoOffset,0,999,.1)}
+        ${clip ? numberRow("Timeline start","media.start",clip.start,0,999,.1) : ""}
         <div class="stats">
-          <div><span>Source</span><b>${state.video ? state.video.name : "-"}</b></div>
-          <div><span>Trim</span><b>${fmtTC(state.trim.start, false)} - ${fmtTC(state.trim.end, false)}</b></div>
+          <div><span>Source</span><b>${clip ? clip.name : "-"}</b></div>
+          <div><span>Clip count</span><b>${state.videoClips.filter((item) => item.trackId === selectedTrack.id).length || "-"}</b></div>
+          <div><span>Trim</span><b>${clip ? `${fmtTC(clip.trimStart || 0, false)} - ${fmtTC(clip.trimEnd ?? clip.duration, false)}` : "-"}</b></div>
         </div>
         ${selectedTrack.locked ? "" : `<button class="danger" id="deleteTrackBtn">Remove Track</button>`}
       `;
     } else if (selectedTrack && selectedTrack.type === "audio") {
+      const clip = selectedClipForTrack("audio", selectedTrack.id);
       el.inspector.innerHTML = `
         <div class="section"><h3>Music Track</h3></div>
         ${selectedTrack.locked ? "" : textRow("Name", "track.label", selectedTrack.label)}
         ${checkboxRow("Mute music", "musicAudio.muted", state.musicAudio.muted)}
         ${slider("Music volume","musicAudio.volume",state.musicAudio.volume,0,1,.01,"%")}
-        ${numberRow("Timeline start","audioOffset",state.audioOffset,0,999,.1)}
+        ${clip ? numberRow("Timeline start","media.start",clip.start,0,999,.1) : ""}
         <div class="stats">
-          <div><span>Source</span><b>${state.audio ? state.audio.name : "-"}</b></div>
-          <div><span>Duration</span><b>${state.audio ? fmtTC(state.audio.duration, false) : "-"}</b></div>
+          <div><span>Source</span><b>${clip ? clip.name : "-"}</b></div>
+          <div><span>Clip count</span><b>${state.audioClips.filter((item) => item.trackId === selectedTrack.id).length || "-"}</b></div>
+          <div><span>Duration</span><b>${clip ? fmtTC(clip.duration, false) : "-"}</b></div>
         </div>
         ${selectedTrack.locked ? "" : `<button class="danger" id="deleteTrackBtn">Remove Track</button>`}
       `;
@@ -996,6 +1343,7 @@
           <div><span>Detected sections</span><b>${state.bpmSections && state.bpmSections.length ? state.bpmSections.length : "-"}</b></div>
           <div><span>Active preset</span><b>${currentLevel ? BPM_IMAGE_PRESETS.color[currentLevel.id] : "-"}</b></div>
         </div>
+        <button class="wide-action" id="generateBpmLogoBtn">Create BPM Logo Track</button>
         ${swatches("bpmOv.color", state.bpmOv.color)}
       `;
     } else if (state.tracks.some((track) => track.id === selected && track.type === "overlay")) {
@@ -1040,8 +1388,8 @@
     } else {
       el.inspector.innerHTML = `
         <div class="stats">
-          <div><span>Video</span><b>${state.video ? state.video.name : "-"}</b></div>
-          <div><span>Audio</span><b>${state.audio ? state.audio.name : "-"}</b></div>
+          <div><span>Video clips</span><b>${state.videoClips.length || "-"}</b></div>
+          <div><span>Audio clips</span><b>${state.audioClips.length || "-"}</b></div>
           <div><span>BPM</span><b>${state.bpm || "-"}</b></div>
           <div><span>Duration</span><b>${fmtTC(duration(), false)}</b></div>
           <div><span>Subtitles</span><b>${state.subs.length}</b></div>
@@ -1092,6 +1440,13 @@
     } else if (path.startsWith("track.")) {
       const track = state.tracks.find((item) => item.id === state.selected);
       if (track) track[path.slice(6)] = value;
+    } else if (path.startsWith("media.")) {
+      const selectedTrack = state.tracks.find((track) => track.id === state.selected);
+      const clip = selectedTrack ? selectedClipForTrack(selectedTrack.type, selectedTrack.id) : null;
+      if (clip) {
+        clip[path.slice(6)] = value;
+        syncLegacyMediaState();
+      }
     } else {
       const parts = path.split(".");
       if (parts.length === 1) state[parts[0]] = value;
@@ -1133,26 +1488,38 @@
       lane.dataset.track = track.id;
       el.timelineInner.appendChild(lane);
 
-      if (track.type === "video" && state.video && track.id === state.videoTrackId) {
-        const b = block("video-block", state.video.name, state.videoOffset, trimDuration());
-        b.dataset.media = "video";
-        b.insertAdjacentHTML("afterbegin", videoThumbStrip());
-        b.innerHTML += `<span class="handle left" data-trim="start"></span><span class="handle right" data-trim="end"></span>`;
-        lane.appendChild(b);
-      } else if (track.type === "video") {
-        lane.appendChild(block("empty-block", "Empty video track", 0, 4));
-      } else if (track.type === "audio" && state.audio && track.id === state.audioTrackId) {
-        const b = block("audio-block", `<canvas></canvas><span>${escapeHtml(state.audio.name)}</span>`, state.audioOffset, state.audio.duration, true);
-        b.dataset.media = "audio";
-        lane.appendChild(b);
-        refs.waveCanvas = b.querySelector("canvas");
-        drawWaveform();
+      if (track.type === "video") {
+        const clips = state.videoClips.filter((clip) => clip.trackId === track.id);
+        if (clips.length) {
+          clips.forEach((clip) => {
+            const b = block(`video-block ${state.selected === track.id ? "selected" : ""}`, clip.name, clip.start, clipDuration(clip));
+            b.dataset.mediaClip = clip.id;
+            b.insertAdjacentHTML("afterbegin", videoThumbStrip(clip));
+            b.innerHTML += `<button class="clip-delete" data-delete-media-clip="${clip.id}" title="Delete clip">x</button><span class="handle left" data-trim="${clip.id}:start"></span><span class="handle right" data-trim="${clip.id}:end"></span>`;
+            lane.appendChild(b);
+          });
+        } else {
+          lane.appendChild(block("empty-block", "Empty video track", 0, 4));
+        }
       } else if (track.type === "audio") {
-        lane.appendChild(block("empty-block", "Empty audio track", 0, 4));
-      } else if (track.type === "viz" && state.audio && state.viz.enabled) {
-        const b = block(`viz-block ${state.selected === "viz" ? "selected" : ""}`, `${vizMini()}<span>${state.viz.style} spectrum</span>`, state.audioOffset, state.audio.duration, true);
-        b.dataset.select = "viz";
-        lane.appendChild(b);
+        const clips = state.audioClips.filter((clip) => clip.trackId === track.id);
+        if (clips.length) {
+          clips.forEach((clip) => {
+            const b = block("audio-block", `<canvas></canvas><span>${escapeHtml(clip.name)}</span>`, clip.start, clip.duration, true);
+            b.dataset.mediaClip = clip.id;
+            b.innerHTML += `<button class="clip-delete" data-delete-media-clip="${clip.id}" title="Delete clip">x</button>`;
+            lane.appendChild(b);
+            drawWaveform(b.querySelector("canvas"), clip);
+          });
+        } else {
+          lane.appendChild(block("empty-block", "Empty audio track", 0, 4));
+        }
+      } else if (track.type === "viz" && state.audioClips.length && state.viz.enabled) {
+        state.audioClips.forEach((audio) => {
+          const b = block(`viz-block ${state.selected === "viz" ? "selected" : ""}`, `${vizMini()}<span>${state.viz.style} spectrum</span>`, audio.start, audio.duration, true);
+          b.dataset.select = "viz";
+          lane.appendChild(b);
+        });
       } else if (track.type === "overlay") {
         state.subs.filter((s) => (s.trackId || "overlay-1") === track.id).forEach((s) => {
           const cls = `${s.type === "logo" ? "logo-block" : "sub-block"} ${state.selected === s.id ? "selected" : ""}`;
@@ -1174,12 +1541,14 @@
     div.innerHTML = raw ? content : `<span>${escapeHtml(content)}</span>`;
     return div;
   }
-  function videoThumbStrip() {
-    if (!state.video || !state.video.thumbs || !state.video.thumbs.length || trimDuration() <= 0) return "";
-    const imgs = state.video.thumbs
-      .filter((thumb) => thumb.time >= state.trim.start && thumb.time <= state.trim.end)
+  function videoThumbStrip(clip) {
+    if (!clip || !clip.thumbs || !clip.thumbs.length || clipDuration(clip) <= 0) return "";
+    const trimStart = clip.trimStart || 0;
+    const trimEnd = clip.trimEnd ?? clip.duration;
+    const imgs = clip.thumbs
+      .filter((thumb) => thumb.time >= trimStart && thumb.time <= trimEnd)
       .map((thumb) => {
-        const left = ((thumb.time - state.trim.start) / trimDuration()) * 100;
+        const left = ((thumb.time - trimStart) / clipDuration(clip)) * 100;
         return `<img src="${thumb.url}" style="left:${left}%" title="${fmtTC(thumb.time, false)}" alt="">`;
       })
       .join("");
@@ -1199,13 +1568,13 @@
     }
     return `<span class="subtitle-label">${escapeHtml(s.text || "Subtitle")}</span>`;
   }
-  function drawWaveform() {
-    if (!refs.waveCanvas || !state.audio) return;
-    const w = Math.max(10, Math.floor(state.audio.duration * state.pxPerSec));
-    refs.waveCanvas.width = w;
-    refs.waveCanvas.height = 40;
-    const wctx = refs.waveCanvas.getContext("2d");
-    const { mins, maxs } = state.audio.peaks;
+  function drawWaveform(canvas, clip) {
+    if (!canvas || !clip || !clip.peaks) return;
+    const w = Math.max(10, Math.floor(clip.duration * state.pxPerSec));
+    canvas.width = w;
+    canvas.height = 40;
+    const wctx = canvas.getContext("2d");
+    const { mins, maxs } = clip.peaks;
     wctx.clearRect(0, 0, w, 40);
     wctx.fillStyle = "rgba(45,212,191,.9)";
     for (let x = 0; x < w; x++) {
@@ -1215,15 +1584,34 @@
       wctx.fillRect(x, top, 1, Math.max(1, bot - top));
     }
   }
+  function bpmTimelineSections() {
+    const sections = [];
+    state.audioClips.forEach((audio) => {
+      const clipSections = audio.bpmSections && audio.bpmSections.length
+        ? audio.bpmSections
+        : (audio.bpm > 0 ? [{ start: 0, end: audio.duration, bpm: audio.bpm }] : []);
+      clipSections.forEach((section) => {
+        if (!section.bpm || section.bpm <= 0) return;
+        sections.push({
+          start: (audio.start || 0) + section.start,
+          end: (audio.start || 0) + section.end,
+          bpm: section.bpm,
+          audioClipId: audio.id
+        });
+      });
+    });
+    if (!sections.length && state.bpm > 0) {
+      sections.push({ start: 0, end: duration(), bpm: state.bpm, audioClipId: "" });
+    }
+    return sections.sort((a, b) => a.start - b.start);
+  }
   function renderBpmLane(lane) {
     lane.innerHTML = "";
-    const sections = (state.bpmSections && state.bpmSections.length)
-      ? state.bpmSections
-      : (state.bpm > 0 ? [{ start: 0, end: state.audio ? state.audio.duration : duration(), bpm: state.bpm }] : []);
+    const sections = bpmTimelineSections();
     sections.forEach((section) => {
       if (!section.bpm || section.bpm <= 0) return;
-      const start = state.audioOffset + section.start;
-      const end = state.audioOffset + section.end;
+      const start = section.start;
+      const end = section.end;
       const level = bpmLevelFor(section.bpm);
       const sec = document.createElement("span");
       sec.className = `bpm-section bpm-${level.id}`;
@@ -1264,6 +1652,7 @@
   function refresh(options) {
     options = options || {};
     state.name = el.projectName.value || "Untitled";
+    syncLegacyMediaState();
     fitStageToPreview();
     applyAudioSettings();
     updateClock();
@@ -1323,6 +1712,8 @@
       bpm: state.bpm,
       bpmSections: state.bpmSections,
       bpmOv: state.bpmOv,
+      videoClips: state.videoClips.map((clip) => ({ id: clip.id, type: "video", trackId: clip.trackId, name: clip.name, sourcePath: clip.sourcePath || "", duration: clip.duration, start: clip.start, trimStart: clip.trimStart || 0, trimEnd: clip.trimEnd ?? clip.duration, volume: clip.volume, muted: clip.muted, thumbs: includeBlobs ? (clip.thumbs || []) : [], blob: includeBlobs ? (clip.blob || refs.videoBlobs[clip.id]) : null })),
+      audioClips: state.audioClips.map((clip) => ({ id: clip.id, type: "audio", trackId: clip.trackId, name: clip.name, sourcePath: clip.sourcePath || "", duration: clip.duration, start: clip.start, trimStart: clip.trimStart || 0, trimEnd: clip.trimEnd ?? clip.duration, volume: clip.volume, muted: clip.muted, bpm: clip.bpm || 0, bpmSections: clip.bpmSections || [], peaks: includeBlobs ? clip.peaks : null, blob: includeBlobs ? (clip.blob || refs.audioBlobs[clip.id]) : null })),
       videoName: state.video && state.video.name,
       audioName: state.audio && state.audio.name,
       videoAudio: state.videoAudio,
@@ -1332,7 +1723,7 @@
       subtitleFx: state.subtitleFx,
       subs: state.subs.map((s) => {
         const sub = normalizeSubtitle(s);
-        return { id: sub.id, type: sub.type, text: sub.text, start: sub.start, end: sub.end, trackId: sub.trackId, x: sub.x, y: sub.y, size: sub.size, color: sub.color, fontFamily: sub.fontFamily, fontWeight: sub.fontWeight, fontStyle: sub.fontStyle, effect: sub.effect, align: sub.align, background: sub.background };
+        return { id: sub.id, type: sub.type, text: sub.text, sourcePath: sub.sourcePath || "", url: sub.url || "", source: sub.source || null, start: sub.start, end: sub.end, trackId: sub.trackId, x: sub.x, y: sub.y, size: sub.size, color: sub.color, fontFamily: sub.fontFamily, fontWeight: sub.fontWeight, fontStyle: sub.fontStyle, effect: sub.effect, align: sub.align, background: sub.background };
       }),
       logoBlobs: includeBlobs ? Object.fromEntries(state.subs.filter((s) => s.type === "logo" && s.blob).map((s) => [s.id, s.blob])) : {}
     };
@@ -1344,18 +1735,40 @@
     if (window.pacekeeper && window.pacekeeper.saveProjectFile) {
       const fileRec = projectRecord(false);
       fileRec.media = {
-        video: state.video ? { name: state.video.name } : null,
-        audio: state.audio ? { name: state.audio.name } : null
+        video: state.videoClips.map((clip) => ({ name: clip.name, path: clip.sourcePath || "", trackId: clip.trackId, start: clip.start })),
+        audio: state.audioClips.map((clip) => ({ name: clip.name, path: clip.sourcePath || "", trackId: clip.trackId, start: clip.start }))
       };
       try { await window.pacekeeper.saveProjectFile(fileRec); } catch (_) {}
     }
     await refreshProjects();
     setStatus(`Saved project "${rec.name}".`);
   }
+  function reviveVideoClip(rec) {
+    const blob = rec.blob || null;
+    const url = blob ? URL.createObjectURL(blob) : rec.url || "";
+    const clip = { ...rec, type: "video", url, trimStart: rec.trimStart || 0, trimEnd: rec.trimEnd ?? rec.duration ?? 0, thumbs: rec.thumbs || [], blob };
+    if (blob) refs.videoBlobs[clip.id] = blob;
+    return clip;
+  }
+  function reviveAudioClip(rec) {
+    const blob = rec.blob || null;
+    const url = blob ? URL.createObjectURL(blob) : rec.url || "";
+    const clip = { ...rec, type: "audio", url, trimStart: rec.trimStart || 0, trimEnd: rec.trimEnd ?? rec.duration ?? 0, peaks: rec.peaks, blob };
+    if (blob) refs.audioBlobs[clip.id] = blob;
+    return clip;
+  }
+  function migrateLegacyClips(rec) {
+    const videoClips = (rec.videoClips || []).map(reviveVideoClip);
+    const audioClips = (rec.audioClips || []).map(reviveAudioClip);
+    return { videoClips, audioClips };
+  }
   async function loadProject(id) {
     stop();
     const rec = await idbTx("readonly", (s) => s.get(id));
     if (!rec) return;
+    refs.videoBlobs = {};
+    refs.audioBlobs = {};
+    const migrated = migrateLegacyClips(rec);
     Object.assign(state, {
       id: rec.id,
       tracks: rec.tracks || defaultTracks(),
@@ -1375,24 +1788,38 @@
       selected: null,
       time: 0,
       video: null,
-      audio: null
+      audio: null,
+      videoClips: migrated.videoClips,
+      audioClips: migrated.audioClips
     });
     el.projectName.value = rec.name || "Untitled";
     el.bpmInput.value = state.bpm ? String(state.bpm) : "";
-    if (rec.audioBlob) {
+    syncLegacyMediaState();
+    if (!migrated.audioClips.length && rec.audioBlob) {
+      state.time = rec.audioOffset ?? 0;
       await loadAudio(rec.audioBlob, false, state.audioTrackId);
-      state.audioOffset = rec.audioOffset ?? state.audioOffset;
     }
-    if (rec.videoBlob) {
+    if (!migrated.videoClips.length && rec.videoBlob) {
+      state.time = rec.videoOffset ?? 0;
       await loadVideo(rec.videoBlob, state.videoTrackId);
-      state.trim = rec.trim || state.trim;
-      state.videoOffset = rec.videoOffset ?? state.videoOffset;
+      const clip = primaryClip("video");
+      if (clip && rec.trim) {
+        clip.trimStart = rec.trim.start || 0;
+        clip.trimEnd = rec.trim.end || clip.duration;
+      }
     }
+    state.time = 0;
+    syncLegacyMediaState();
+    if (state.video) attachVideoClip(state.video);
+    if (state.audio) attachAudioClip(state.audio);
     state.subs = (rec.subs || []).map((s) => {
       const out = normalizeSubtitle(s);
       if (out.type === "logo" && rec.logoBlobs && rec.logoBlobs[out.id]) {
         out.blob = rec.logoBlobs[out.id];
         out.url = URL.createObjectURL(out.blob);
+        out.img = new Image();
+        out.img.src = out.url;
+      } else if (out.type === "logo" && out.url) {
         out.img = new Image();
         out.img.src = out.url;
       }
@@ -1411,6 +1838,10 @@
     state.tracks = rec.tracks || defaultTracks();
     state.videoTrackId = rec.videoTrackId || firstTrackIdOfType("video");
     state.audioTrackId = rec.audioTrackId || firstTrackIdOfType("audio");
+    refs.videoBlobs = {};
+    refs.audioBlobs = {};
+    state.videoClips = (rec.videoClips || []).map(reviveVideoClip);
+    state.audioClips = (rec.audioClips || []).map(reviveAudioClip);
     state.videoAudio = rec.videoAudio || state.videoAudio;
     state.musicAudio = rec.musicAudio || state.musicAudio;
     state.viz = rec.viz || state.viz;
@@ -1418,28 +1849,42 @@
     state.bpmSections = rec.bpmSections || [];
     state.bpmOv = { ...state.bpmOv, ...(rec.bpmOv || {}) };
     state.subtitleFx = rec.subtitleFx || state.subtitleFx;
-    state.subs = (rec.subs || []).map((sub) => normalizeSubtitle({ ...sub, trackId: sub.trackId || activeOverlayTrackId() }));
+    state.subs = (rec.subs || []).map((sub) => {
+      const out = normalizeSubtitle({ ...sub, trackId: sub.trackId || activeOverlayTrackId() });
+      if (out.type === "logo" && out.url) {
+        out.img = new Image();
+        out.img.src = out.url;
+      }
+      return out;
+    });
     state.selected = null;
+    syncLegacyMediaState();
     el.bpmInput.value = state.bpm ? String(state.bpm) : "";
     setStatus("Loaded project settings. Re-import media files if this JSON was moved.");
     refresh();
   }
 
-  function startTrimDrag(which, ev) {
+  function findMediaClip(id) {
+    return state.videoClips.find((clip) => clip.id === id) || state.audioClips.find((clip) => clip.id === id) || null;
+  }
+  function startTrimDrag(clipId, which, ev) {
     ev.stopPropagation();
-    const sourceStart = state.trim.start;
-    const sourceEnd = state.trim.end;
-    const offsetStart = state.videoOffset;
+    const clip = state.videoClips.find((item) => item.id === clipId);
+    if (!clip) return;
+    const sourceStart = clip.trimStart || 0;
+    const sourceEnd = clip.trimEnd ?? clip.duration;
+    const offsetStart = clip.start || 0;
     const move = (e) => {
       const t = timeFromEvent(e);
       if (which === "start") {
         const newOffset = clamp(t, 0, offsetStart + sourceEnd - sourceStart - 0.1);
         const delta = newOffset - offsetStart;
-        state.videoOffset = newOffset;
-        state.trim.start = clamp(sourceStart + delta, 0, state.trim.end - 0.1);
+        clip.start = newOffset;
+        clip.trimStart = clamp(sourceStart + delta, 0, (clip.trimEnd ?? clip.duration) - 0.1);
       } else {
-        state.trim.end = clamp(state.trim.start + Math.max(0.1, t - state.videoOffset), state.trim.start + 0.1, state.video ? state.video.duration : sourceEnd);
+        clip.trimEnd = clamp((clip.trimStart || 0) + Math.max(0.1, t - (clip.start || 0)), (clip.trimStart || 0) + 0.1, clip.duration || sourceEnd);
       }
+      syncLegacyMediaState();
       refresh();
     };
     const up = () => {
@@ -1491,15 +1936,17 @@
     window.addEventListener("pointerup", up);
     refresh();
   }
-  function startMediaDrag(kind, ev) {
+  function startMediaDrag(clipId, ev) {
     ev.stopPropagation();
-    state.selected = kind === "video" ? state.videoTrackId : state.audioTrackId;
+    const clip = findMediaClip(clipId);
+    if (!clip) return;
+    state.selected = clip.trackId;
     const x0 = ev.clientX;
-    const start = kind === "video" ? state.videoOffset : state.audioOffset;
+    const start = clip.start || 0;
     const move = (e) => {
       const offset = Math.max(0, start + (e.clientX - x0) / state.pxPerSec);
-      if (kind === "video") state.videoOffset = offset;
-      else state.audioOffset = offset;
+      clip.start = offset;
+      syncLegacyMediaState();
       if (state.playing) refs.clock = { t0: state.time, perf0: performance.now() };
       syncMedia(state.time);
       refresh();
@@ -1511,6 +1958,75 @@
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     refresh();
+  }
+  function canvasPointFromEvent(ev) {
+    const rect = el.stage.getBoundingClientRect();
+    return {
+      x: clamp((ev.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
+      y: clamp((ev.clientY - rect.top) / Math.max(1, rect.height), 0, 1)
+    };
+  }
+  function overlayBounds(sub) {
+    const s = normalizeSubtitle(sub);
+    if (s.type === "logo") {
+      const w = Math.max(0.04, Number(s.size) || 0.22);
+      const ratio = s.img && s.img.width && s.img.height ? s.img.height / s.img.width : 1;
+      const h = clamp(w * ratio * (CW / CH), 0.04, 0.6);
+      return { left: s.x - w / 2, right: s.x + w / 2, top: s.y - h / 2, bottom: s.y + h / 2 };
+    }
+    const fontSize = Number(s.size) || 56;
+    const width = clamp(String(s.text || "Subtitle").length * fontSize * 0.00042 + 0.08, 0.12, 0.82);
+    const height = clamp(fontSize / CH * 1.5, 0.06, 0.28);
+    return { left: s.x - width / 2, right: s.x + width / 2, top: s.y - height / 2, bottom: s.y + height / 2 };
+  }
+  function overlayItemAtPoint(point) {
+    const trackOrder = new Map(state.tracks.map((track, index) => [track.id, index]));
+    const candidates = state.subs
+      .filter((sub) => state.time >= sub.start && state.time <= sub.end)
+      .sort((a, b) => (trackOrder.get(b.trackId || "overlay-1") || 0) - (trackOrder.get(a.trackId || "overlay-1") || 0));
+    const selected = state.subs.find((sub) => sub.id === state.selected);
+    if (selected && !candidates.some((sub) => sub.id === selected.id)) candidates.unshift(selected);
+    return candidates.find((sub) => {
+      const b = overlayBounds(sub);
+      return point.x >= b.left && point.x <= b.right && point.y >= b.top && point.y <= b.bottom;
+    }) || null;
+  }
+  function startOverlayCanvasDrag(ev) {
+    if (state.exporting) return false;
+    const point = canvasPointFromEvent(ev);
+    const sub = overlayItemAtPoint(point);
+    if (!sub) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    state.selected = sub.id;
+    const startPoint = point;
+    const targets = sub.source && sub.source.kind === "bpm-logo"
+      ? state.subs.filter((item) => item.source && item.source.kind === "bpm-logo" && item.source.audioClipId === sub.source.audioClipId)
+      : [sub];
+    const starts = targets.map((item) => ({
+      item,
+      x: Number(item.x) || 0.5,
+      y: Number(item.y) || 0.5
+    }));
+    const move = (e) => {
+      const next = canvasPointFromEvent(e);
+      const dx = next.x - startPoint.x;
+      const dy = next.y - startPoint.y;
+      starts.forEach((entry) => {
+        entry.item.x = clamp(entry.x + dx, 0, 1);
+        entry.item.y = clamp(entry.y + dy, 0, 1);
+      });
+      refresh({ inspector: false, projects: false });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      refresh();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    refresh();
+    return true;
   }
   function timeFromEvent(e) {
     const r = el.timelineScroll.getBoundingClientRect();
@@ -1594,9 +2110,10 @@
       const preview = el.stage.closest(".preview");
       if (preview) refs.stageResizeObserver.observe(preview);
     }
-    $("videoBtn").onclick = () => el.videoInput.click();
-    $("audioBtn").onclick = () => el.audioInput.click();
-    $("logoBtn").onclick = () => el.logoInput.click();
+    el.stage.addEventListener("pointerdown", startOverlayCanvasDrag);
+    $("videoBtn").onclick = importVideoFromDialog;
+    $("audioBtn").onclick = importAudioFromDialog;
+    $("logoBtn").onclick = importLogoFromDialog;
     $("subtitleBtn").onclick = addSubtitle;
     $("addTrackBtn").onclick = showTrackModal;
     el.trackModalClose.onclick = hideTrackModal;
@@ -1614,8 +2131,8 @@
     });
     $("newProjectBtn").onclick = () => {
       stop();
-      state.id = null; state.video = null; state.audio = null; state.tracks = defaultTracks(); state.videoTrackId = "video"; state.audioTrackId = "audio"; state.videoOffset = 0; state.audioOffset = 0; state.videoAudio = { muted: true, volume: 0.8 }; state.musicAudio = { muted: false, volume: 1 }; state.subtitleFx = { effect: "none", shadow: true, background: false, align: "center" }; state.subs = []; state.selected = null; state.bpm = 0; state.bpmSections = []; state.time = 0; state.trim = { start: 0, end: 0 };
-      refs.videoBlob = null; refs.audioBlob = null; el.video.removeAttribute("src"); el.audio.removeAttribute("src"); el.projectName.value = "Untitled";
+      state.id = null; state.video = null; state.audio = null; state.videoClips = []; state.audioClips = []; state.tracks = defaultTracks(); state.videoTrackId = "video"; state.audioTrackId = "audio"; state.videoOffset = 0; state.audioOffset = 0; state.videoAudio = { muted: true, volume: 0.8 }; state.musicAudio = { muted: false, volume: 1 }; state.subtitleFx = { effect: "none", shadow: true, background: false, align: "center" }; state.subs = []; state.selected = null; state.bpm = 0; state.bpmSections = []; state.time = 0; state.trim = { start: 0, end: 0 };
+      refs.videoBlob = null; refs.audioBlob = null; refs.videoBlobs = {}; refs.audioBlobs = {}; refs.activeVideoClipId = null; refs.activeAudioClipId = null; el.video.removeAttribute("src"); el.audio.removeAttribute("src"); el.projectName.value = "Untitled";
       setStatus("New project.");
       refresh();
     };
@@ -1663,8 +2180,19 @@
       syncLaneLabelScroll();
     });
     document.addEventListener("pointerdown", (e) => {
+      const deleteMediaClip = e.target.closest("[data-delete-media-clip]");
+      if (deleteMediaClip) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (removeMediaClipById(deleteMediaClip.dataset.deleteMediaClip)) refresh();
+        return;
+      }
       const trim = e.target.dataset.trim;
-      if (trim) { startTrimDrag(trim, e); return; }
+      if (trim) {
+        const [clipId, edge] = trim.split(":");
+        startTrimDrag(clipId, edge, e);
+        return;
+      }
       const subResize = e.target.dataset.subResize;
       if (subResize) {
         const [id, edge] = subResize.split(":");
@@ -1672,8 +2200,8 @@
         if (sub) startSubResize(sub, edge, e);
         return;
       }
-      const media = e.target.closest(".block") && e.target.closest(".block").dataset.media;
-      if (media) { startMediaDrag(media, e); return; }
+      const mediaClip = e.target.closest(".block") && e.target.closest(".block").dataset.mediaClip;
+      if (mediaClip) { startMediaDrag(mediaClip, e); return; }
       const subId = e.target.closest(".block") && e.target.closest(".block").dataset.sub;
       if (subId) {
         const sub = state.subs.find((s) => s.id === subId);
@@ -1754,6 +2282,9 @@
         state.subs = state.subs.filter((s) => s.id !== state.selected);
         state.selected = null;
         refresh();
+      }
+      if (e.target.id === "generateBpmLogoBtn") {
+        generateBpmLogoOverlay();
       }
       if (e.target.id === "deleteTrackBtn") {
         if (removeTrackById(state.selected)) refresh();

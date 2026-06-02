@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PaceKeeper Movie Maker</title>
-  <link rel="stylesheet" href="src/renderer/app.css?v=20260602-fit-track-import" />
+  <link rel="stylesheet" href="src/renderer/app.css?v=20260603-version-020" />
 </head>
 <body>
   <div id="app">
@@ -12,7 +12,7 @@
       <div class="brand">
         <span class="mark"></span>
         <div>
-          <strong>PaceKeeper</strong>
+          <span class="brand-title"><strong>PaceKeeper</strong><span class="app-version">v0.2.0</span></span>
           <small>Movie Maker</small>
         </div>
       </div>
@@ -23,7 +23,7 @@
         <button id="forwardBtn" class="icon-btn" title="Forward">&gt;|</button>
         <div class="clock">
           <span id="liveLamp"></span>
-          <b id="timecode">00:00:00</b>
+          <span id="timecode">00:00:00</span>
           <small id="duration">DUR 00:00:00</small>
         </div>
       </div>
@@ -58,7 +58,7 @@
           <button id="addTrackBtn">Add Track</button>
           <span class="divider"></span>
           <button id="vizBtn" class="toggle is-on">Visualizer</button>
-          <button id="bpmBtn" class="toggle is-on">BPM</button>
+          <button id="bpmBtn" class="toggle">BPM</button>
           <label class="mini-field">BPM <input id="bpmInput" type="number" min="40" max="240" placeholder="120" /></label>
           <button id="tapBtn">Tap</button>
         </div>

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 let win;
 
@@ -47,5 +48,36 @@ ipcMain.handle("project:loadJson", async () => {
   });
   if (result.canceled || !result.filePaths[0]) return { canceled: true };
   const raw = await fs.readFile(result.filePaths[0], "utf8");
-  return { canceled: false, path: result.filePaths[0], project: JSON.parse(raw) };
+  const project = JSON.parse(raw);
+  for (const clip of project.videoClips || []) {
+    if (clip.sourcePath && !clip.url) clip.url = pathToFileURL(clip.sourcePath).toString();
+  }
+  for (const clip of project.audioClips || []) {
+    if (clip.sourcePath && !clip.url) clip.url = pathToFileURL(clip.sourcePath).toString();
+  }
+  for (const sub of project.subs || []) {
+    if (sub.type === "logo" && sub.sourcePath && !sub.url) sub.url = pathToFileURL(sub.sourcePath).toString();
+  }
+  return { canceled: false, path: result.filePaths[0], project };
+});
+
+ipcMain.handle("media:open", async (_event, kind) => {
+  const filters = kind === "image"
+    ? [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }]
+    : kind === "audio"
+      ? [{ name: "Audio", extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac"] }]
+      : [{ name: "Video", extensions: ["mp4", "mov", "m4v", "webm", "mkv", "avi"] }];
+  const result = await dialog.showOpenDialog(win, {
+    title: kind === "image" ? "Import image" : kind === "audio" ? "Import audio" : "Import video",
+    properties: ["openFile"],
+    filters
+  });
+  if (result.canceled || !result.filePaths[0]) return { canceled: true };
+  const filePath = result.filePaths[0];
+  return {
+    canceled: false,
+    path: filePath,
+    name: path.basename(filePath),
+    url: pathToFileURL(filePath).toString()
+  };
 });
