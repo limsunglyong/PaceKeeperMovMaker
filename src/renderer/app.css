@@ -174,9 +174,9 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   background: linear-gradient(180deg, #101117, #090a0e);
 }
 #stage {
-  width: 100%;
-  max-width: 1120px;
+  width: auto;
   height: auto;
+  max-width: 100%;
   max-height: 100%;
   aspect-ratio: 16 / 9;
   background: #05060a;
@@ -214,6 +214,7 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   text-transform: uppercase;
 }
 .section { margin-bottom: 16px; }
+.section.compact { margin-bottom: 13px; }
 .section h3 {
   margin: 0 0 10px;
   color: var(--dim);
@@ -249,6 +250,10 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .seg button { padding: 8px 4px; font-size: 11px; }
 .seg button.is-on { background: var(--accent); }
+.text-style button {
+  min-height: 34px;
+  font-weight: 800;
+}
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatches button {
   width: 30px; height: 30px; border-radius: 7px;
@@ -472,6 +477,30 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   bottom: 0;
   width: 1px;
   background: rgba(255,77,94,.65);
+  z-index: 2;
+}
+.bpm-section {
+  position: absolute;
+  top: 8px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 4px;
+  padding: 6px 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: rgba(255,255,255,.86);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  z-index: 1;
+}
+.bpm-slow { background: rgba(148,163,184,.2); }
+.bpm-normal { background: rgba(45,212,191,.2); }
+.bpm-fast { background: rgba(255,176,32,.2); }
+.bpm-sprint { background: rgba(255,77,94,.22); }
+.bpm-lane .beat-line {
+  background: rgba(255,255,255,.32);
 }
 .bpm-tag {
   position: sticky;
@@ -484,6 +513,7 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   padding: 2px 6px;
   font-family: var(--mono);
   font-size: 11px;
+  z-index: 3;
 }
 .remove-track {
   margin-left: auto;
