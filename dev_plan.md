@@ -4,6 +4,14 @@
 
 ### 2026-06-03
 
+- UI 후속 개선/버전 증가: 남은 수동 확인 3개(`.pkmm.json` 저장/불러오기, 밝은 회색 ruler, 선택 강조 일관성)가 확인 완료되었다. Timeline 선택 상태를 clip 단위까지 명확히 하기 위해 `selectedClipId`를 추가하고, video/audio clip 클릭/드래그 시 Inspector가 해당 clip을 대상으로 보도록 정리했다. import/delete/drag/track 추가 후에는 짧은 flash highlight를 표시해 방금 바뀐 block 또는 lane을 쉽게 확인할 수 있게 했다. 앱 버전은 `0.2.6`으로 올리고 CSS/JS cache query를 `20260603-selection-flash-026`으로 갱신했다.
+- UI 조정/버전 증가: timeline ruler의 cyan glow가 화면 톤에서 과하게 보인다는 수동 확인 결과를 반영해, ruler 시간 표시와 BPM tag/section 텍스트의 glow를 제거하고 밝은 회색 계열로 낮췄다. 좌측 Projects/track label 폭 정렬과 ruler sticky 동작은 확인 완료로 기록한다. 앱 버전은 `0.2.5`로 올리고 CSS/JS cache query를 `20260603-ruler-gray-025`로 갱신했다.
+- UI 개선/버전 증가: Projects sidebar와 하단 track label 영역의 폭을 같은 CSS 변수로 맞추고, timeline ruler를 세로 스크롤 중에도 상단에 고정되도록 개선했다. ruler 시간 표시에는 cyan 계열 색상과 약한 glow를 적용하고, selected lane/block 강조, audio/BPM label 가독성, toolbar overflow 처리, timeline 높이를 함께 조정했다. 앱 버전은 `0.2.4`로 올리고 CSS/JS cache query를 `20260603-timeline-ui-024`로 갱신했다.
+- UI 개선 검토 기록: Native FFmpeg export로 넘어가기 전에 Timeline 가독성과 선택 상태를 먼저 정리하기로 했다. 현재 기능이 늘면서 하단 track/timeline 영역의 밀도와 스크롤 동작이 사용성을 크게 좌우하므로, project sidebar와 track label width 정렬, timeline header/ruler 고정, 하단 track viewport 개선, timeline 시간 표시 cyan glow 적용, BPM Logo/Visualizer/Audio block 가독성 개선을 UI 개선 항목으로 우선 검토한다.
+- 버그 수정/버전 증가: Audio clip을 timeline에서 드래그하거나 import 배치 규칙 때문에 기존 audio clip이 뒤로 밀릴 때, 해당 clip에 귀속된 BPM Logo overlay item들의 `start/end`가 함께 이동하지 않던 문제를 수정했다. `setMediaClipStart()`/`shiftBpmLogoItemsForAudioClip()` 경로를 추가해 audio clip start 변경이 BPM Logo item 시간에도 같은 delta로 반영되도록 했다. 또한 BPM Logo는 preview 표시를 위해 같은 시간대에 여러 logo/text item을 생성하므로 timeline lane에서 겹쳐 보이던 문제를 줄이기 위해, BPM Logo 생성 item은 section 단위 대표 block 하나로 그룹 렌더링한다. 앱 버전은 `0.2.3`으로 올렸다.
+- 버그 수정/버전 증가: Audio clip 삭제 후 마지막 audio가 사라졌는데도 전역 `state.bpm`/`state.bpmSections`가 남아 BPM lane에 `139 BPM` 같은 잔여 section/tag가 표시되던 문제를 수정했다. Audio clip/track 삭제 후 남은 audio clip 기준으로 BPM 전역 포인터를 재동기화하고, audio clip이 하나도 없으면 BPM 값, BPM sections, BPM input, Canvas BPM toggle, audio element src를 초기화한다. 연결된 BPM Logo 생성 item이 모두 삭제된 빈 `BPM Logo` overlay track도 정리한다. 같은 파일을 다시 선택해도 import가 되도록 file input change 처리 후 input value를 비운다. 앱 버전은 `0.2.2`로 올렸다.
+- 버그 수정/버전 증가: Electron native file dialog import에서 renderer가 `file://` URL을 `fetch()`해 `File`로 변환하던 흐름을 보강했다. main process가 선택 파일의 bytes와 MIME type을 함께 넘기고 renderer가 이를 우선 사용하도록 변경해, `file://` fetch 실패 시 native dialog import가 조용히 file input fallback으로 떨어질 가능성을 줄였다. 이 버그 수정에 맞춰 앱 버전을 `0.2.1`로 올리고 화면 표시 버전과 `package.json` 버전을 함께 갱신했다.
+- 캐시 회피 수정: `index.html`의 `app.js` query version이 예전 `20260602-fit-track-import`에 머물러 있어 최신 renderer 변경이 브라우저 캐시에 가려질 수 있던 문제를 수정했다. 새 query version은 `20260603-dialog-import-021`이다.
 - 작업 방향 기록: 긴급 구조 개선 항목 중 `Track별 media clip 구조화`를 우선 진행했다. 기존 단일 `state.video`/`state.audio`를 즉시 완전히 제거하기보다, 새 `state.videoClips[]`/`state.audioClips[]`를 주 데이터 구조로 추가하고 기존 필드는 현재 선택/대표 clip을 가리키는 호환 포인터로 유지했다. 이렇게 해서 기존 렌더링/export/BPM 코드의 대규모 파손을 줄이면서 track별 clip 저장과 표시를 먼저 안정화했다.
 - 버그 수정: `Video Track 1`에 영상을 넣은 뒤 `Video Track 2`에 다른 영상을 import하면 첫 번째 영상이 사라지던 문제를 수정했다. 영상 import는 이제 선택된 video track에 새 clip을 추가하며 기존 track의 clip을 덮어쓰지 않는다. Audio import도 동일하게 `state.audioClips[]`에 누적되도록 변경했다.
 - 개선 반영: 영상/음악 import 시 clip 시작 위치를 항상 0초로 두지 않고 현재 playhead 위치(`state.time`)를 기본 `start`로 사용하도록 변경했다. import 상태 메시지에도 배치된 timeline 시작 시간이 표시된다.
@@ -679,6 +687,19 @@ function generateBpmSubtitles(options, state) {
 
 ### 5. Timeline UX
 
+- 프로젝트 sidebar 가로 폭과 하단 track label 영역의 가로 폭을 일치시켜 좌측 UI가 한 덩어리로 정렬되어 보이게 한다. 현재는 Projects 패널 폭과 lane label 폭이 달라 timeline 진입부가 어긋나 보인다.
+- 하단 track/timeline 영역의 viewport를 개선한다. 사용자가 세로 스크롤하거나 드래그할 때 ruler/header가 위로 밀려 사라지면 현재 시간과 위치를 잃기 쉬우므로, timeline ruler와 toolbar 또는 최소한 ruler를 sticky로 유지하는 방안을 우선 검토한다.
+- timeline ruler 시간 표시 색상은 cyan glow보다 밝은 회색 계열이 더 적합한 것으로 확인되었다. 시간 표시는 밝은 회색 계열로 유지하고 glow는 제거한다.
+- track lane 높이와 block label 밀도를 재정리한다. Audio/Visualizer/BPM Logo가 3개 이상 있을 때 각 block이 서로 과하게 붙거나 겹쳐 보이지 않도록 label overflow, block padding, 대표 block 표시 방식을 다듬는다.
+- 선택 상태를 더 명확히 한다. 현재 선택된 clip/track/subtitle이 Inspector와 timeline에서 같은 대상으로 보이도록 selected outline, lane highlight, Inspector 제목을 맞춘다.
+- import/delete/drag 후 짧은 highlight 상태를 추가하는 방안을 검토한다. statusbar 메시지와 함께 방금 바뀐 clip이나 track이 시각적으로 확인되면 수동 검증과 실제 편집이 쉬워진다.
+- 하단 track을 보는 방식 개선 아이디어:
+  - Timeline ruler/header sticky 처리.
+  - Timeline 영역 높이 조절 splitter 추가.
+  - track lane label 고정 + timeline content만 가로/세로 스크롤.
+  - track type별 접기/collapse와 compact mode 추가.
+  - playhead 중심 자동 스크롤 toggle 추가.
+  - zoom preset과 Fit 버튼의 동작을 더 명확히 분리.
 - item snap
 - beat snap
 - shift/alt modifier drag
@@ -737,23 +758,9 @@ npm.cmd start
 
 ## 13. 확인해야할 사항
 
-내일 수동 확인할 항목:
+남은 수동 확인 항목:
 
-- 상단 브랜드 영역에서 `PaceKeeper` 오른쪽에 `v0.2.0`이 작고 non-bold로 표시되는지 확인한다.
-- 상단 시간 표시가 오렌지 색상, `Segoe UI` 계열 얇은 폰트, 고정 폭 숫자로 보이고 시간이 바뀌어도 표시 박스가 흔들리지 않는지 확인한다.
-- Video/Audio import 시 playhead 위치에 따라 clip 배치가 맞는지 확인한다. playhead가 기존 clip 안에 있으면 새 clip이 기존 clip 끝에 붙어야 하고, 앞쪽에서 겹치면 기존 clip이 뒤로 밀려야 한다.
-- Video/Audio clip 오른쪽 상단 `x` 버튼으로 track이 아니라 clip만 삭제되는지 확인한다.
-- 추가 Video/Audio track 삭제 시 해당 track의 clip도 함께 삭제되고 기본 locked Video/Audio track은 삭제되지 않는지 확인한다.
-- 첫 번째 audio import 후 BPM Logo overlay, BPM lane section, Visualizer block이 생성되는지 확인한다.
-- 두 번째 audio import 후 첫 번째 audio의 BPM Logo overlay, BPM lane section, Visualizer block이 사라지지 않고 유지되는지 확인한다.
-- 두 번째 audio의 BPM Logo overlay가 기존 항목을 덮어쓰지 않고 추가로 생성되는지 확인한다.
-- 특정 audio clip만 삭제했을 때 해당 clip에서 생성된 BPM Logo overlay, BPM lane section, Visualizer block만 사라지는지 확인한다.
-- BPM Logo overlay가 BPM section 개수만큼 생성되는지 확인한다. 예: 3개 section이면 3개, `slow-normal-fast-sprint-fast`면 5개가 표시되어야 한다.
-- BPM Logo overlay에서 현재 section에 해당하는 logo/text만 color로 표시되고, 나머지는 gray로 표시되는지 확인한다.
-- Preview Canvas에서 일반 overlay item은 개별 드래그되고, BPM Logo item은 같은 audio clip에서 생성된 logo/text 그룹이 함께 이동하는지 확인한다.
-- Audio import 후 우측 상단 Canvas BPM animation이 자동으로 나타나지 않는지 확인한다. 상단 `BPM` toggle을 직접 켤 때만 Canvas BPM overlay가 표시되어야 한다.
-- `.pkmm.json` 저장/불러오기 시 `sourcePath`, clip start, BPM Logo metadata가 가능한 범위에서 유지되는지 확인한다.
-- 브라우저 캐시 때문에 이전 CSS/JS가 보이면 새로고침 또는 캐시 강제 새로고침 후 다시 확인한다.
+- 현재 없음.
 
 현재 자동 검증으로 확인한 항목:
 
@@ -769,7 +776,7 @@ node --check src/preload/preload.js
 
 ## 14. 버전 표기
 
-현재 앱 버전: `0.2.0`
+현재 앱 버전: `0.2.6`
 
 버전 표시 위치:
 

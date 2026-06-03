@@ -5,6 +5,30 @@ const { pathToFileURL } = require("node:url");
 
 let win;
 
+function mimeForPath(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const types = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".m4v": "video/x-m4v",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif"
+  };
+  return types[ext] || "application/octet-stream";
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1500,
@@ -74,10 +98,13 @@ ipcMain.handle("media:open", async (_event, kind) => {
   });
   if (result.canceled || !result.filePaths[0]) return { canceled: true };
   const filePath = result.filePaths[0];
+  const data = await fs.readFile(filePath);
   return {
     canceled: false,
     path: filePath,
     name: path.basename(filePath),
-    url: pathToFileURL(filePath).toString()
+    url: pathToFileURL(filePath).toString(),
+    type: mimeForPath(filePath),
+    data
   };
 });

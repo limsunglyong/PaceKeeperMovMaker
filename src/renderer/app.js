@@ -96,6 +96,8 @@
     tracks: defaultTracks(),
     subs: [],
     selected: null,
+    selectedClipId: null,
+    flash: null,
     time: 0,
     playing: false,
     exporting: false,
@@ -120,6 +122,7 @@
     audioBlobs: {},
     activeVideoClipId: null,
     activeAudioClipId: null,
+    flashTimer: 0,
     tap: [],
     waveCanvas: null,
     bpmImages: {}
@@ -128,6 +131,52 @@
   function setStatus(text) { el.status.textContent = text; }
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
   function mediaClips(type) { return type === "video" ? state.videoClips : state.audioClips; }
+  function findMediaClip(id) {
+    return state.videoClips.find((clip) => clip.id === id) || state.audioClips.find((clip) => clip.id === id) || null;
+  }
+  function selectedMediaClip() {
+    return findMediaClip(state.selectedClipId);
+  }
+  function selectMediaClip(clip) {
+    if (!clip) return;
+    state.selected = clip.trackId;
+    state.selectedClipId = clip.id;
+    if (clip.type === "video") state.videoTrackId = clip.trackId;
+    if (clip.type === "audio") state.audioTrackId = clip.trackId;
+  }
+  function clearSelectedMediaClip() {
+    state.selectedClipId = null;
+  }
+  function trackIsSelected(track) {
+    const selectedSub = state.subs.find((sub) => sub.id === state.selected);
+    const clip = selectedMediaClip();
+    return state.selected === track.id
+      || (selectedSub && selectedSub.trackId === track.id)
+      || (clip && clip.trackId === track.id);
+  }
+  function isFreshFlash(kind, id) {
+    if (!state.flash || state.flash.kind !== kind || state.flash.id !== id) return false;
+    if (performance.now() > state.flash.until) {
+      state.flash = null;
+      return false;
+    }
+    return true;
+  }
+  function flashClass(kind, id) {
+    return isFreshFlash(kind, id) ? " flash" : "";
+  }
+  function markFlash(kind, id) {
+    if (!kind || !id) return;
+    state.flash = { kind, id, until: performance.now() + 950 };
+    if (refs.flashTimer) clearTimeout(refs.flashTimer);
+    refs.flashTimer = setTimeout(() => {
+      refs.flashTimer = 0;
+      if (state.flash && state.flash.kind === kind && state.flash.id === id) {
+        state.flash = null;
+        refresh({ inspector: false, projects: false });
+      }
+    }, 1000);
+  }
   function primaryClip(type) {
     const clips = mediaClips(type);
     const trackId = type === "video" ? state.videoTrackId : state.audioTrackId;
@@ -161,9 +210,28 @@
       .sort((a, b) => trackOrderIndex(a.trackId) - trackOrderIndex(b.trackId))[0] || null;
   }
   function selectedClipForTrack(type, trackId) {
-    return mediaClips(type).find((clip) => clip.trackId === trackId && state.time >= clip.start && state.time <= clip.start + clipDuration(clip))
+    const selected = selectedMediaClip();
+    return selected && selected.type === type && selected.trackId === trackId ? selected
+      : mediaClips(type).find((clip) => clip.trackId === trackId && state.time >= clip.start && state.time <= clip.start + clipDuration(clip))
       || mediaClips(type).find((clip) => clip.trackId === trackId)
       || null;
+  }
+  function shiftBpmLogoItemsForAudioClip(audioClipId, delta) {
+    if (!audioClipId || !delta) return;
+    state.subs.forEach((sub) => {
+      if (!sub.source || sub.source.kind !== "bpm-logo" || sub.source.audioClipId !== audioClipId) return;
+      sub.start = Math.max(0, (Number(sub.start) || 0) + delta);
+      sub.end = Math.max(sub.start + 0.05, (Number(sub.end) || 0) + delta);
+    });
+  }
+  function setMediaClipStart(clip, nextStart) {
+    if (!clip) return;
+    const current = Number(clip.start) || 0;
+    const next = Math.max(0, Number(nextStart) || 0);
+    const delta = next - current;
+    if (!delta) return;
+    clip.start = next;
+    if (clip.type === "audio") shiftBpmLogoItemsForAudioClip(clip.id, delta);
   }
   function resolveImportStart(type, trackId, newDuration) {
     const clips = mediaClips(type)
@@ -177,7 +245,7 @@
       const clipStart = clip.start || 0;
       const clipEnd = clipStart + clipDuration(clip);
       if (clipEnd <= start || clipStart >= cursorEnd) return;
-      clip.start = cursorEnd;
+      setMediaClipStart(clip, cursorEnd);
       cursorEnd = clip.start + clipDuration(clip);
     });
     return start;
@@ -196,6 +264,8 @@
     return found ? found.id : type;
   }
   function activeMediaTrackId(type) {
+    const selectedClip = selectedMediaClip();
+    if (selectedClip && selectedClip.type === type && state.tracks.some((track) => track.id === selectedClip.trackId)) return selectedClip.trackId;
     const selectedTrack = state.tracks.find((track) => track.id === state.selected && track.type === type);
     if (selectedTrack) return selectedTrack.id;
     const key = type === "video" ? "videoTrackId" : "audioTrackId";
@@ -245,12 +315,14 @@
   function removeTrackById(removeId) {
     const track = state.tracks.find((item) => item.id === removeId);
     if (!track || track.locked) return false;
+    let flashTrackId = null;
     if (track.type === "overlay") {
       const fallback = overlayTracks().find((item) => item.id !== removeId);
       if (!fallback) {
         setStatus("Keep at least one overlay track.");
         return false;
       }
+      flashTrackId = fallback.id;
       state.subs.forEach((sub) => { if (sub.trackId === removeId) sub.trackId = fallback.id; });
       setStatus("Removed overlay track. Existing items moved to the next overlay track.");
     } else {
@@ -267,11 +339,39 @@
       if (track.type === "audio" && state.audioTrackId === removeId) {
         state.audioTrackId = state.tracks.find((item) => item.type === "audio" && item.id !== removeId)?.id || "audio";
       }
+      flashTrackId = track.type === "video" ? state.videoTrackId : state.audioTrackId;
       setStatus(`Removed ${track.type} track with ${removedClipCount} clip(s).`);
     }
     state.tracks = state.tracks.filter((item) => item.id !== removeId);
     if (state.selected === removeId) state.selected = null;
+    if (state.selectedClipId && !findMediaClip(state.selectedClipId)) state.selectedClipId = null;
+    markFlash("track", flashTrackId);
+    if (track.type === "audio") cleanupAudioDerivedState();
     return true;
+  }
+  function cleanupAudioDerivedState() {
+    const audioClipIds = new Set(state.audioClips.map((clip) => clip.id));
+    state.subs = state.subs.filter((sub) => !(sub.source && sub.source.kind === "bpm-logo" && sub.source.audioClipId && !audioClipIds.has(sub.source.audioClipId)));
+    const bpmLogoTrackIds = new Set(state.subs.filter((sub) => sub.source && sub.source.kind === "bpm-logo").map((sub) => sub.trackId));
+    state.tracks = state.tracks.filter((track) => !(track.type === "overlay" && track.label === "BPM Logo" && !bpmLogoTrackIds.has(track.id)));
+    if (!state.audioClips.length) {
+      state.audio = null;
+      state.audioOffset = 0;
+      state.bpm = 0;
+      state.bpmSections = [];
+      state.bpmOv.enabled = false;
+      refs.audioBlob = null;
+      refs.activeAudioClipId = null;
+      el.audio.pause();
+      el.audio.removeAttribute("src");
+      el.audio.load();
+      el.bpmInput.value = "";
+    } else {
+      const audio = primaryClip("audio");
+      state.bpm = audio && audio.bpm ? audio.bpm : 0;
+      state.bpmSections = audio && audio.bpmSections ? audio.bpmSections : [];
+      el.bpmInput.value = state.bpm ? String(state.bpm) : "";
+    }
   }
   function removeMediaClipById(clipId) {
     const videoClip = state.videoClips.find((clip) => clip.id === clipId);
@@ -294,9 +394,13 @@
         refs.activeAudioClipId = null;
         el.audio.pause();
         el.audio.removeAttribute("src");
+        el.audio.load();
       }
+      cleanupAudioDerivedState();
     }
-    if (state.selected === clip.trackId) state.selected = clip.trackId;
+    if (state.selectedClipId === clipId) state.selectedClipId = null;
+    state.selected = clip.trackId;
+    markFlash("track", clip.trackId);
     syncLegacyMediaState();
     setStatus(`Removed ${clip.type} clip "${clip.name}".`);
     return true;
@@ -1005,9 +1109,17 @@
   }
 
   async function fileFromOpenResult(result) {
+    if (result.data) {
+      const bytes = result.data instanceof ArrayBuffer
+        ? new Uint8Array(result.data)
+        : ArrayBuffer.isView(result.data)
+          ? new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength)
+          : new Uint8Array(result.data);
+      return new File([bytes], result.name, { type: result.type || "" });
+    }
     const response = await fetch(result.url);
     const blob = await response.blob();
-    return new File([blob], result.name, { type: blob.type || "" });
+    return new File([blob], result.name, { type: result.type || blob.type || "" });
   }
   async function importVideoFromDialog() {
     if (!window.pacekeeper || !window.pacekeeper.openMediaFile) {
@@ -1078,7 +1190,8 @@
     state.videoTrackId = targetTrackId;
     state.videoClips.push(clip);
     syncLegacyMediaState();
-    state.selected = state.videoTrackId;
+    selectMediaClip(clip);
+    markFlash("clip", clip.id);
     setStatus(`Loaded video "${file.name}" on ${state.tracks.find((track) => track.id === state.videoTrackId)?.label || "Video"} at ${fmtTC(clip.start, false)}.`);
     refresh();
     try {
@@ -1134,7 +1247,8 @@
     state.audioTrackId = targetTrackId;
     state.audioClips.push(clip);
     syncLegacyMediaState();
-    state.selected = state.audioTrackId;
+    selectMediaClip(clip);
+    markFlash("clip", clip.id);
     if (detect) {
       clip.bpmSections = detectBPMSections(buffer);
       if (clip.bpmSections.length) {
@@ -1161,6 +1275,8 @@
     const end = start + 3;
     state.subs.push(normalizeSubtitle({ id, type: "text", text: "New subtitle", start, end, trackId: activeOverlayTrackId(), x: 0.5, y: 0.74, size: 56, color: "#ffffff", background: true }));
     state.selected = id;
+    clearSelectedMediaClip();
+    markFlash("sub", id);
     state.time = start;
     syncMedia(state.time);
     refresh();
@@ -1173,6 +1289,8 @@
       const start = state.time;
       state.subs.push(normalizeSubtitle({ id, type: "logo", text: file.name, start, end: start + 6, trackId: activeOverlayTrackId(), x: 0.5, y: 0.18, size: 0.22, color: "#fff", url, img, blob: file, sourcePath: sourcePath || "" }));
       state.selected = id;
+      clearSelectedMediaClip();
+      markFlash("sub", id);
       state.time = start;
       syncMedia(state.time);
       refresh();
@@ -1444,7 +1562,8 @@
       const selectedTrack = state.tracks.find((track) => track.id === state.selected);
       const clip = selectedTrack ? selectedClipForTrack(selectedTrack.type, selectedTrack.id) : null;
       if (clip) {
-        clip[path.slice(6)] = value;
+        if (path === "media.start") setMediaClipStart(clip, value);
+        else clip[path.slice(6)] = value;
         syncLegacyMediaState();
       }
     } else {
@@ -1457,19 +1576,18 @@
   function renderTimeline() {
     const dur = duration() || 30;
     const width = Math.max(el.timelineScroll.clientWidth, dur * state.pxPerSec + 60);
-    const height = 27 + state.tracks.length * 44;
+    const height = 29 + state.tracks.length * 44;
     el.timelineInner.style.width = `${width}px`;
     el.timelineInner.style.height = `${height}px`;
-    el.laneLabels.innerHTML = `<div class="ruler-gap"></div>`;
+    const labelRows = [];
     state.tracks.forEach((track, index) => {
       const row = document.createElement("div");
-      const selectedSub = state.subs.find((sub) => sub.id === state.selected);
-      row.className = (selectedSub && selectedSub.trackId === track.id) || state.selected === track.id ? "selected" : "";
+      row.className = `${trackIsSelected(track) ? "selected" : ""}${flashClass("track", track.id)}`;
       row.dataset.track = track.id;
       row.innerHTML = `<b style="background:${track.color}">${codeForTrack(index)}</b><span>${escapeHtml(track.label)}</span>${track.locked ? "" : `<button class="remove-track" data-remove-track="${track.id}" title="Remove track">x</button>`}`;
-      el.laneLabels.appendChild(row);
+      labelRows.push(row.outerHTML);
     });
-    el.laneLabels.innerHTML = `<div class="lane-labels-content">${el.laneLabels.innerHTML}</div>`;
+    el.laneLabels.innerHTML = `<div class="ruler-gap"></div><div class="lane-labels-content">${labelRows.join("")}</div>`;
     syncLaneLabelScroll();
     el.ruler.innerHTML = "";
     const step = state.pxPerSec < 24 ? 10 : state.pxPerSec < 60 ? 5 : 1;
@@ -1484,7 +1602,7 @@
     Array.from(el.timelineInner.querySelectorAll(".lane")).forEach((lane) => lane.remove());
     state.tracks.forEach((track) => {
       const lane = document.createElement("div");
-      lane.className = `lane ${track.type === "overlay" ? "subs-lane" : ""} ${track.type === "bpm" ? "bpm-lane" : ""}`;
+      lane.className = `lane ${track.type === "overlay" ? "subs-lane" : ""} ${track.type === "bpm" ? "bpm-lane" : ""} ${trackIsSelected(track) ? "selected" : ""}${flashClass("track", track.id)}`;
       lane.dataset.track = track.id;
       el.timelineInner.appendChild(lane);
 
@@ -1492,7 +1610,7 @@
         const clips = state.videoClips.filter((clip) => clip.trackId === track.id);
         if (clips.length) {
           clips.forEach((clip) => {
-            const b = block(`video-block ${state.selected === track.id ? "selected" : ""}`, clip.name, clip.start, clipDuration(clip));
+            const b = block(`video-block ${state.selectedClipId === clip.id ? "selected" : ""}${flashClass("clip", clip.id)}`, clip.name, clip.start, clipDuration(clip));
             b.dataset.mediaClip = clip.id;
             b.insertAdjacentHTML("afterbegin", videoThumbStrip(clip));
             b.innerHTML += `<button class="clip-delete" data-delete-media-clip="${clip.id}" title="Delete clip">x</button><span class="handle left" data-trim="${clip.id}:start"></span><span class="handle right" data-trim="${clip.id}:end"></span>`;
@@ -1505,7 +1623,7 @@
         const clips = state.audioClips.filter((clip) => clip.trackId === track.id);
         if (clips.length) {
           clips.forEach((clip) => {
-            const b = block("audio-block", `<canvas></canvas><span>${escapeHtml(clip.name)}</span>`, clip.start, clip.duration, true);
+            const b = block(`audio-block ${state.selectedClipId === clip.id ? "selected" : ""}${flashClass("clip", clip.id)}`, `<canvas></canvas><span>${escapeHtml(clip.name)}</span>`, clip.start, clip.duration, true);
             b.dataset.mediaClip = clip.id;
             b.innerHTML += `<button class="clip-delete" data-delete-media-clip="${clip.id}" title="Delete clip">x</button>`;
             lane.appendChild(b);
@@ -1516,22 +1634,52 @@
         }
       } else if (track.type === "viz" && state.audioClips.length && state.viz.enabled) {
         state.audioClips.forEach((audio) => {
-          const b = block(`viz-block ${state.selected === "viz" ? "selected" : ""}`, `${vizMini()}<span>${state.viz.style} spectrum</span>`, audio.start, audio.duration, true);
+          const b = block(`viz-block ${state.selected === "viz" ? "selected" : ""}${flashClass("track", "viz")}`, `${vizMini()}<span>${state.viz.style} spectrum</span>`, audio.start, audio.duration, true);
           b.dataset.select = "viz";
           lane.appendChild(b);
         });
       } else if (track.type === "overlay") {
-        state.subs.filter((s) => (s.trackId || "overlay-1") === track.id).forEach((s) => {
-          const cls = `${s.type === "logo" ? "logo-block" : "sub-block"} ${state.selected === s.id ? "selected" : ""}`;
-          const b = block(cls, overlayBlockContent(s), s.start, Math.max(0.2, s.end - s.start), true);
-          b.dataset.sub = s.id;
-          b.innerHTML += `<span class="handle left" data-sub-resize="${s.id}:start"></span><span class="handle right" data-sub-resize="${s.id}:end"></span>`;
+        groupedOverlayTimelineItems(track.id).forEach((item) => {
+          const s = item.sub;
+          const cls = `${s.type === "logo" ? "logo-block" : "sub-block"} ${state.selected === s.id ? "selected" : ""}${flashClass("sub", s.id)}`;
+          const b = block(cls, item.content || overlayBlockContent(s), s.start, Math.max(0.2, s.end - s.start), true);
+          if (item.grouped) b.dataset.select = s.id;
+          else {
+            b.dataset.sub = s.id;
+            b.innerHTML += `<span class="handle left" data-sub-resize="${s.id}:start"></span><span class="handle right" data-sub-resize="${s.id}:end"></span>`;
+          }
           lane.appendChild(b);
         });
       } else if (track.type === "bpm") {
         renderBpmLane(lane);
       }
     });
+  }
+  function groupedOverlayTimelineItems(trackId) {
+    const items = [];
+    const groups = new Map();
+    state.subs.filter((s) => (s.trackId || "overlay-1") === trackId).forEach((sub) => {
+      if (sub.source && sub.source.kind === "bpm-logo") {
+        const key = [
+          sub.source.audioClipId || "",
+          sub.source.activeSectionIndex ?? "",
+          Number(sub.start || 0).toFixed(3),
+          Number(sub.end || 0).toFixed(3)
+        ].join(":");
+        if (!groups.has(key)) {
+          const level = sub.source.paceLevel ? bpmLevelFor(sub.source.bpm || 0).label : "BPM";
+          groups.set(key, {
+            sub,
+            grouped: true,
+            content: `<span class="subtitle-label">BPM Logo ${escapeHtml(level)}</span>`
+          });
+          items.push(groups.get(key));
+        }
+      } else {
+        items.push({ sub, grouped: false });
+      }
+    });
+    return items.sort((a, b) => (a.sub.start || 0) - (b.sub.start || 0));
   }
   function block(cls, content, start, len, raw) {
     const div = document.createElement("div");
@@ -1786,6 +1934,7 @@
       audioOffset: rec.audioOffset ?? 0,
       subs: [],
       selected: null,
+      selectedClipId: null,
       time: 0,
       video: null,
       audio: null,
@@ -1858,19 +2007,18 @@
       return out;
     });
     state.selected = null;
+    state.selectedClipId = null;
     syncLegacyMediaState();
     el.bpmInput.value = state.bpm ? String(state.bpm) : "";
     setStatus("Loaded project settings. Re-import media files if this JSON was moved.");
     refresh();
   }
 
-  function findMediaClip(id) {
-    return state.videoClips.find((clip) => clip.id === id) || state.audioClips.find((clip) => clip.id === id) || null;
-  }
   function startTrimDrag(clipId, which, ev) {
     ev.stopPropagation();
     const clip = state.videoClips.find((item) => item.id === clipId);
     if (!clip) return;
+    selectMediaClip(clip);
     const sourceStart = clip.trimStart || 0;
     const sourceEnd = clip.trimEnd ?? clip.duration;
     const offsetStart = clip.start || 0;
@@ -1890,6 +2038,8 @@
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      markFlash("clip", clip.id);
+      refresh();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1897,6 +2047,7 @@
   function startSubDrag(s, ev) {
     ev.stopPropagation();
     state.selected = s.id;
+    clearSelectedMediaClip();
     if (!state.playing && (state.time < s.start || state.time > s.end)) seekIntoSubtitle(s);
     const x0 = ev.clientX;
     const start = s.start;
@@ -1910,6 +2061,8 @@
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      markFlash("sub", s.id);
+      refresh();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1918,6 +2071,7 @@
   function startSubResize(s, edge, ev) {
     ev.stopPropagation();
     state.selected = s.id;
+    clearSelectedMediaClip();
     const x0 = ev.clientX;
     const start0 = s.start;
     const end0 = s.end;
@@ -1940,12 +2094,12 @@
     ev.stopPropagation();
     const clip = findMediaClip(clipId);
     if (!clip) return;
-    state.selected = clip.trackId;
+    selectMediaClip(clip);
     const x0 = ev.clientX;
     const start = clip.start || 0;
     const move = (e) => {
       const offset = Math.max(0, start + (e.clientX - x0) / state.pxPerSec);
-      clip.start = offset;
+      setMediaClipStart(clip, offset);
       syncLegacyMediaState();
       if (state.playing) refs.clock = { t0: state.time, perf0: performance.now() };
       syncMedia(state.time);
@@ -1954,6 +2108,9 @@
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      markFlash("clip", clip.id);
+      setStatus(`Moved ${clip.type} clip "${clip.name}" to ${fmtTC(clip.start || 0, false)}.`);
+      refresh();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -1999,6 +2156,7 @@
     ev.preventDefault();
     ev.stopPropagation();
     state.selected = sub.id;
+    clearSelectedMediaClip();
     const startPoint = point;
     const targets = sub.source && sub.source.kind === "bpm-logo"
       ? state.subs.filter((item) => item.source && item.source.kind === "bpm-logo" && item.source.audioClipId === sub.source.audioClipId)
@@ -2021,6 +2179,7 @@
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      markFlash("sub", sub.id);
       refresh();
     };
     window.addEventListener("pointermove", move);
@@ -2124,6 +2283,8 @@
       const id = addTrack(type);
       if (id) {
         state.selected = id;
+        clearSelectedMediaClip();
+        markFlash("track", id);
         setStatus(`Added a new ${type} track.`);
         hideTrackModal();
         refresh();
@@ -2131,7 +2292,7 @@
     });
     $("newProjectBtn").onclick = () => {
       stop();
-      state.id = null; state.video = null; state.audio = null; state.videoClips = []; state.audioClips = []; state.tracks = defaultTracks(); state.videoTrackId = "video"; state.audioTrackId = "audio"; state.videoOffset = 0; state.audioOffset = 0; state.videoAudio = { muted: true, volume: 0.8 }; state.musicAudio = { muted: false, volume: 1 }; state.subtitleFx = { effect: "none", shadow: true, background: false, align: "center" }; state.subs = []; state.selected = null; state.bpm = 0; state.bpmSections = []; state.time = 0; state.trim = { start: 0, end: 0 };
+      state.id = null; state.video = null; state.audio = null; state.videoClips = []; state.audioClips = []; state.tracks = defaultTracks(); state.videoTrackId = "video"; state.audioTrackId = "audio"; state.videoOffset = 0; state.audioOffset = 0; state.videoAudio = { muted: true, volume: 0.8 }; state.musicAudio = { muted: false, volume: 1 }; state.subtitleFx = { effect: "none", shadow: true, background: false, align: "center" }; state.subs = []; state.selected = null; state.selectedClipId = null; state.flash = null; state.bpm = 0; state.bpmSections = []; state.time = 0; state.trim = { start: 0, end: 0 };
       refs.videoBlob = null; refs.audioBlob = null; refs.videoBlobs = {}; refs.audioBlobs = {}; refs.activeVideoClipId = null; refs.activeAudioClipId = null; el.video.removeAttribute("src"); el.audio.removeAttribute("src"); el.projectName.value = "Untitled";
       setStatus("New project.");
       refresh();
@@ -2148,17 +2309,33 @@
         el.projectInput.click();
       }
     };
-    el.videoInput.onchange = (e) => e.target.files[0] && loadVideo(e.target.files[0], activeMediaTrackId("video"));
-    el.audioInput.onchange = (e) => e.target.files[0] && loadAudio(e.target.files[0], true, activeMediaTrackId("audio"));
-    el.logoInput.onchange = (e) => e.target.files[0] && addLogo(e.target.files[0]);
-    el.projectInput.onchange = (e) => e.target.files[0] && loadProjectJsonFile(e.target.files[0]);
+    el.videoInput.onchange = (e) => {
+      const file = e.target.files[0];
+      e.target.value = "";
+      if (file) loadVideo(file, activeMediaTrackId("video"));
+    };
+    el.audioInput.onchange = (e) => {
+      const file = e.target.files[0];
+      e.target.value = "";
+      if (file) loadAudio(file, true, activeMediaTrackId("audio"));
+    };
+    el.logoInput.onchange = (e) => {
+      const file = e.target.files[0];
+      e.target.value = "";
+      if (file) addLogo(file);
+    };
+    el.projectInput.onchange = (e) => {
+      const file = e.target.files[0];
+      e.target.value = "";
+      if (file) loadProjectJsonFile(file);
+    };
     $("rewindBtn").onclick = () => seek(0);
     $("forwardBtn").onclick = () => seek(duration());
     $("stopBtn").onclick = stop;
     el.play.onclick = () => state.playing ? pause() : play();
     el.export.onclick = exportVideo;
-    el.vizBtn.onclick = () => { state.viz.enabled = !state.viz.enabled; state.selected = "viz"; refresh(); };
-    el.bpmBtn.onclick = () => { state.bpmOv.enabled = !state.bpmOv.enabled; state.selected = "bpm"; refresh(); };
+    el.vizBtn.onclick = () => { state.viz.enabled = !state.viz.enabled; state.selected = "viz"; clearSelectedMediaClip(); markFlash("track", "viz"); refresh(); };
+    el.bpmBtn.onclick = () => { state.bpmOv.enabled = !state.bpmOv.enabled; state.selected = "bpm"; clearSelectedMediaClip(); markFlash("track", "bpm"); refresh(); };
     $("tapBtn").onclick = tapBpm;
     el.bpmInput.oninput = (e) => { state.bpm = parseFloat(e.target.value) || 0; state.bpmSections = []; refresh(); };
     $("zoomOutBtn").onclick = () => zoom(1 / 1.4);
@@ -2211,7 +2388,7 @@
         }
       }
       const sel = e.target.closest(".block") && e.target.closest(".block").dataset.select;
-      if (sel) { state.selected = sel; refresh(); }
+      if (sel) { state.selected = sel; clearSelectedMediaClip(); refresh(); }
     });
     el.timelineInner.addEventListener("click", (e) => {
       const lane = e.target.closest(".lane");
@@ -2222,6 +2399,7 @@
       else if (track.type === "viz") state.selected = "viz";
       else if (track.type === "overlay") state.selected = track.id;
       else state.selected = track.id;
+      clearSelectedMediaClip();
       refresh();
     });
     el.laneLabels.addEventListener("click", (e) => {
@@ -2237,6 +2415,7 @@
       else if (track && track.type === "viz") state.selected = "viz";
       else if (track && track.type === "overlay") state.selected = track.id;
       else if (track) state.selected = track.id;
+      clearSelectedMediaClip();
       refresh();
     });
     el.inspector.addEventListener("input", (e) => {
@@ -2279,8 +2458,11 @@
         if (input) input.click();
       }
       if (e.target.id === "deleteSubBtn") {
+        const deleted = state.subs.find((s) => s.id === state.selected);
         state.subs = state.subs.filter((s) => s.id !== state.selected);
         state.selected = null;
+        clearSelectedMediaClip();
+        if (deleted) markFlash("track", deleted.trackId || "overlay-1");
         refresh();
       }
       if (e.target.id === "generateBpmLogoBtn") {
