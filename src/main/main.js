@@ -93,6 +93,56 @@ function runFfmpeg(args, onProgress, onChild) {
   });
 }
 
+function audioClipsFromExportOptions(options) {
+  if (Array.isArray(options.audioClips) && options.audioClips.length) {
+    return options.audioClips
+      .filter((clip) => clip && clip.path)
+      .map((clip) => ({
+        path: clip.path,
+        start: Math.max(0, Number(clip.start) || 0),
+        trimStart: Math.max(0, Number(clip.trimStart) || 0),
+        trimEnd: Math.max(0, Number(clip.trimEnd) || 0),
+        volume: Math.max(0, Math.min(1, Number(clip.volume ?? 1) || 0))
+      }))
+      .filter((clip) => clip.volume > 0 && (!clip.trimEnd || clip.trimEnd > clip.trimStart));
+  }
+  if (options.audioPath) {
+    return [{
+      path: options.audioPath,
+      start: Math.max(0, Number(options.audioStart) || 0),
+      trimStart: 0,
+      trimEnd: 0,
+      volume: 1
+    }];
+  }
+  return [];
+}
+
+function audioFilterForClips(clips, projectDuration) {
+  const labels = [];
+  const filters = clips.map((clip, index) => {
+    const input = index + 1;
+    const label = `a${index}`;
+    labels.push(`[${label}]`);
+    const parts = [];
+    if (clip.trimEnd > clip.trimStart) parts.push(`atrim=start=${clip.trimStart.toFixed(3)}:end=${clip.trimEnd.toFixed(3)}`);
+    else parts.push(`atrim=start=${clip.trimStart.toFixed(3)}`);
+    parts.push("asetpts=PTS-STARTPTS");
+    parts.push(`volume=${clip.volume.toFixed(3)}`);
+    const delay = Math.max(0, Math.round(clip.start * 1000));
+    if (delay > 0) parts.push(`adelay=${delay}:all=1`);
+    return `[${input}:a]${parts.join(",")}[${label}]`;
+  });
+  if (!filters.length) return "";
+  const duration = Math.max(0.1, Number(projectDuration) || 0);
+  if (labels.length === 1) {
+    filters.push(`${labels[0]}atrim=0:${duration.toFixed(3)},asetpts=PTS-STARTPTS[aout]`);
+  } else {
+    filters.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0,atrim=0:${duration.toFixed(3)},asetpts=PTS-STARTPTS[aout]`);
+  }
+  return filters.join(";");
+}
+
 async function ffmpegVersion() {
   const output = await runFfmpeg(["-version"]);
   return output.split(/\r?\n/)[0] || "ffmpeg";
@@ -210,19 +260,17 @@ ipcMain.handle("export:finishNative", async (_event, session, options) => {
   const fps = Number(options.fps) || 30;
   const crf = String(options.crf ?? 18);
   const preset = options.preset || "medium";
+  const audioClips = audioClipsFromExportOptions(options);
   const args = [
     "-y",
     "-framerate", String(fps),
     "-i", path.join(session.tempDir, "frame-%06d.png")
   ];
-  if (options.audioPath) {
-    args.push("-i", options.audioPath);
-    const audioDelayMs = Math.max(0, Math.round((Number(options.audioStart) || 0) * 1000));
-    if (audioDelayMs > 0) {
-      args.push("-filter_complex", `[1:a]adelay=${audioDelayMs}:all=1[a]`, "-map", "0:v", "-map", "[a]");
-    } else {
-      args.push("-map", "0:v", "-map", "1:a");
-    }
+  audioClips.forEach((clip) => {
+    args.push("-i", clip.path);
+  });
+  if (audioClips.length) {
+    args.push("-filter_complex", audioFilterForClips(audioClips, options.duration), "-map", "0:v", "-map", "[aout]");
   }
   args.push(
     "-c:v", "libx264",
@@ -230,7 +278,7 @@ ipcMain.handle("export:finishNative", async (_event, session, options) => {
     "-crf", crf,
     "-pix_fmt", "yuv420p"
   );
-  if (options.audioPath) args.push("-c:a", "aac", "-b:a", options.audioBitrate || "192k", "-shortest");
+  if (audioClips.length) args.push("-c:a", "aac", "-b:a", options.audioBitrate || "192k");
   args.push(session.outputPath);
   try {
     await runFfmpeg(args, (text) => {

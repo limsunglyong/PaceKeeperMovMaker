@@ -4,6 +4,9 @@
 
 ### 2026-06-04
 
+- Overlay 이미지 Background layer 추가 및 버전 증가: Overlay track에 로드한 이미지(`logo` item)를 Inspector의 `Layer`에서 `Overlay` 또는 `Background`로 선택할 수 있게 했다. `Background`로 선택한 이미지는 video clip보다 먼저 Canvas에 그려지며, `cover` 방식으로 1280x720 화면을 100% 채운다. Background 이미지는 위치 이동과 크기 조절을 할 수 없도록 Inspector의 X/Y/Logo size 조절을 숨기고, Canvas 직접 드래그 hit-test에서도 제외했다. 기존 이미지 overlay는 기본값 `Overlay`로 유지된다. 앱 버전은 `0.4.1`로 올리고 CSS/JS cache query를 `20260604-bg-layer-047`로 갱신했다.
+- Native export 다중 clip 연동 1차 및 버전 증가: 1순위 작업으로 preview/export frame render에서 같은 시간에 활성화된 여러 video clip을 track 순서대로 합성하도록 변경했다. renderer는 clip별 hidden video element cache를 사용해 각 video clip을 해당 프로젝트 시간의 source time으로 sync/seek하고, 하위 track부터 상위 track 순서로 Canvas에 그린다. Native FFmpeg export는 여러 audio clip을 전달받아 main process에서 `atrim`, `asetpts`, `volume`, `adelay`, `amix` 기반 `filter_complex`로 합성한다. clip별 `start`, `trimStart`, `trimEnd`, `volume`, `muted`를 반영하며, preview audio는 안정성을 위해 기존 대표 audio clip 재생 방식을 유지한다. 앱 버전은 `0.4.0`으로 올리고 CSS/JS cache query를 `20260604-multiclip-export-046`으로 갱신했다.
+- 후속과제 정리: 다음 고도화 작업은 `Native export + 다중 clip 연동`을 1순위로 둔다. 1차 범위는 preview/export frame render에서 같은 시간에 활성화된 여러 video clip을 track 순서대로 합성하고, native FFmpeg export에서 여러 audio clip을 `atrim`/`adelay`/`volume`/`amix` filter graph로 섞는 것이다. Preview audio는 안정성을 위해 당분간 기존 대표 audio clip 재생을 유지하고, 이후 Web Audio 기반 다중 audio preview mixer를 별도 과제로 진행한다. 후속 과제는 다중 video clip의 opacity/transform/PIP 옵션, track별 mute/volume, missing media relink UX, assets 폴더 복사 정책, export 해상도/원본 해상도 선택, BPM 구간 감지 confidence/onset 경계 개선, overlay track reorder로 정리한다.
 - Subtitle font 변경 후 redraw 보강 및 버전 증가: Font 드롭다운 변경 직후 값은 바뀌었지만 Canvas preview가 즉시 새 폰트로 다시 그려지지 않고, 자막을 다시 클릭해야 정상 표시되는 간헐 문제를 수정했다. `drawTextSubtitle()`에서 `ctx.font`를 먼저 적용한 뒤 줄바꿈/텍스트 폭을 측정하도록 순서를 바로잡고, `sub.fontFamily` 변경 시 현재 프레임을 즉시 redraw한 뒤 `requestAnimationFrame`, `document.fonts.load()`, `document.fonts.ready` 완료 시점에도 다시 redraw하도록 보강했다. 앱 버전은 `0.3.15`로 올리고 CSS/JS cache query를 `20260604-font-redraw-045`로 갱신했다.
 - Subtitle font 변경 반영 버그 수정 및 버전 증가: 기존 자막을 선택한 뒤 Font 드롭다운에서 폰트를 변경하면 일부 환경에서 `input` 이벤트가 발생하지 않아 Canvas preview에 새 폰트가 즉시 반영되지 않던 문제를 수정했다. Inspector의 `data-bind`/`data-color-input` 처리 경로를 공통 함수로 통합하고, `change` 이벤트에서도 일반 Inspector binding을 처리하도록 보강해 select 기반 font 변경이 `sub.fontFamily`와 preview refresh에 확실히 반영되게 했다. 앱 버전은 `0.3.14`로 올리고 CSS/JS cache query를 `20260604-font-change-refresh-044`로 갱신했다.
 - Subtitle color Inspector 순서 조정 및 버전 증가: 자막 개별 Inspector에서 font 색상 설정을 배경 관련 설정 위로 올리고, 라벨을 `Color`에서 `Font color`로 변경했다. `Background`, `Background color`, `Background opacity`는 font color 아래쪽 하단 그룹으로 배치해 자막 글자 색상과 배경 설정의 구분을 더 명확히 했다. 앱 버전은 `0.3.13`으로 올리고 CSS/JS cache query를 `20260604-subtitle-color-order-043`으로 갱신했다.
@@ -807,7 +810,7 @@ node --check src/preload/preload.js
 
 ## 14. 버전 표기
 
-현재 앱 버전: `0.3.15`
+현재 앱 버전: `0.4.1`
 
 버전 표시 위치:
 

@@ -200,6 +200,7 @@
     exportStartedAt: 0,
     tap: [],
     waveCanvas: null,
+    videoElements: {},
     bpmImages: {},
     colorModalDrag: null,
     subtitleFontRedrawToken: 0
@@ -313,6 +314,14 @@
         return local >= 0 && local <= clipDuration(clip);
       })
       .sort((a, b) => trackOrderIndex(a.trackId) - trackOrderIndex(b.trackId))[0] || null;
+  }
+  function activeClipsAt(type, t) {
+    return mediaClips(type)
+      .filter((clip) => {
+        const local = clipLocalTime(clip, t);
+        return local >= 0 && local <= clipDuration(clip);
+      })
+      .sort((a, b) => trackOrderIndex(a.trackId) - trackOrderIndex(b.trackId));
   }
   function selectedClipForTrack(type, trackId) {
     const selected = selectedMediaClip();
@@ -437,6 +446,7 @@
       const removedAudioClipIds = track.type === "audio" ? state.audioClips.filter((clip) => clip.trackId === removeId).map((clip) => clip.id) : [];
       if (track.type === "video") state.videoClips = state.videoClips.filter((clip) => clip.trackId !== removeId);
       if (track.type === "audio") state.audioClips = state.audioClips.filter((clip) => clip.trackId !== removeId);
+      if (track.type === "video") pruneVideoElements();
       if (removedAudioClipIds.length) state.subs = state.subs.filter((sub) => !(sub.source && removedAudioClipIds.includes(sub.source.audioClipId)));
       if (track.type === "video" && state.videoTrackId === removeId) {
         state.videoTrackId = state.tracks.find((item) => item.type === "video" && item.id !== removeId)?.id || "video";
@@ -487,6 +497,7 @@
     if (videoClip) {
       state.videoClips = state.videoClips.filter((item) => item.id !== clipId);
       delete refs.videoBlobs[clipId];
+      pruneVideoElements();
       if (refs.activeVideoClipId === clipId) {
         refs.activeVideoClipId = null;
         el.video.pause();
@@ -583,6 +594,60 @@
     const h = mh * scale;
     ctx.drawImage(media, (CW - w) / 2, (CH - h) / 2, w, h);
   }
+  function drawCover(media) {
+    const mw = media.videoWidth || media.width || CW;
+    const mh = media.videoHeight || media.height || CH;
+    const scale = Math.max(CW / mw, CH / mh);
+    const w = mw * scale;
+    const h = mh * scale;
+    ctx.drawImage(media, (CW - w) / 2, (CH - h) / 2, w, h);
+  }
+  function drawEmptyStagePlaceholder() {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.055)";
+    for (let x = 0; x < CW; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke(); }
+    for (let y = 0; y < CH; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke(); }
+    ctx.fillStyle = "rgba(255,255,255,.24)";
+    ctx.font = "600 24px Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("TRACK A - BACKGROUND VIDEO", CW / 2, CH / 2);
+    ctx.restore();
+  }
+  function videoElementForClip(clip) {
+    if (!clip || !clip.url) return null;
+    if (refs.videoElements[clip.id]) return refs.videoElements[clip.id];
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.playsInline = true;
+    video.src = clip.url;
+    refs.videoElements[clip.id] = video;
+    return video;
+  }
+  function pruneVideoElements() {
+    const ids = new Set(state.videoClips.map((clip) => clip.id));
+    Object.keys(refs.videoElements).forEach((id) => {
+      if (ids.has(id)) return;
+      const video = refs.videoElements[id];
+      try { video.pause(); } catch (_) {}
+      video.removeAttribute("src");
+      video.load();
+      delete refs.videoElements[id];
+    });
+  }
+  function syncVideoElementForClip(clip, t, shouldPlay) {
+    const video = videoElementForClip(clip);
+    if (!video) return null;
+    const local = clipLocalTime(clip, t);
+    const active = local >= 0 && local <= clipDuration(clip);
+    const want = (clip.trimStart || 0) + clamp(local, 0, clipDuration(clip));
+    if (Math.abs((video.currentTime || 0) - want) > 0.12) {
+      try { video.currentTime = want; } catch (_) {}
+    }
+    if (shouldPlay && active && video.paused) video.play().catch(() => {});
+    if ((!shouldPlay || !active) && !video.paused) video.pause();
+    return video;
+  }
   function fitStageToPreview() {
     const preview = el.stage.closest(".preview");
     if (!preview) return;
@@ -630,6 +695,7 @@
     out.y = Number.isFinite(parseFloat(out.y)) ? clamp(parseFloat(out.y), 0, 1) : (out.type === "logo" ? 0.18 : 0.74);
     out.size = Number.isFinite(parseFloat(out.size)) && parseFloat(out.size) > 0 ? parseFloat(out.size) : (out.type === "logo" ? 0.22 : 56);
     out.color = out.color || "#ffffff";
+    if (out.type === "logo") out.layer = out.layer === "background" ? "background" : "overlay";
     out.fontFamily = out.fontFamily || SUBTITLE_FONTS[0].value;
     out.fontWeight = out.fontWeight || "400";
     out.fontStyle = out.fontStyle || "normal";
@@ -859,7 +925,7 @@
 
   function renderFrame(t) {
     const fx = state.subtitleFx;
-    const videoClip = activeClipAt("video", t);
+    const videoClips = activeClipsAt("video", t);
     const audioClip = activeClipAt("audio", t) || primaryClip("audio");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
@@ -870,21 +936,16 @@
     ctx.clearRect(0, 0, CW, CH);
     ctx.fillStyle = "#05060a";
     ctx.fillRect(0, 0, CW, CH);
-    if (videoClip) attachVideoClip(videoClip);
-    const videoActive = videoClip && el.video.readyState >= 2;
-    if (videoActive) {
-      drawContain(el.video);
-    } else {
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,255,255,.055)";
-      for (let x = 0; x < CW; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke(); }
-      for (let y = 0; y < CH; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke(); }
-      ctx.fillStyle = "rgba(255,255,255,.24)";
-      ctx.font = "600 24px Consolas, monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("TRACK A - BACKGROUND VIDEO", CW / 2, CH / 2);
-      ctx.restore();
-    }
+    const drewBackground = drawBackgroundOverlays(t);
+    let drewVideo = false;
+    videoClips.forEach((clip) => {
+      const video = syncVideoElementForClip(clip, t, state.playing && !state.exporting);
+      if (video && video.readyState >= 2) {
+        drawContain(video);
+        drewVideo = true;
+      }
+    });
+    if (!drewVideo && !drewBackground) drawEmptyStagePlaceholder();
 
     const audioLocal = audioClip ? clipLocalTime(audioClip, t) : 0;
     const audioActive = audioClip && audioLocal >= 0 && audioLocal <= audioClip.duration;
@@ -899,14 +960,23 @@
     const trackOrder = new Map(state.tracks.map((track, index) => [track.id, index]));
     const active = state.subs
       .map(normalizeSubtitle)
-      .filter((s) => t >= s.start && t <= s.end)
+      .filter((s) => t >= s.start && t <= s.end && s.layer !== "background")
       .sort((a, b) => (trackOrder.get(a.trackId || "overlay-1") || 0) - (trackOrder.get(b.trackId || "overlay-1") || 0));
     active.forEach((s) => drawSub(s, fx));
     if (!state.playing && !state.exporting) {
       const selectedSub = state.subs.find((s) => s.id === state.selected);
       const selectedActive = selectedSub && active.some((s) => s.id === selectedSub.id);
-      if (selectedSub && !selectedActive) drawSub(normalizeSubtitle(selectedSub), fx);
+      if (selectedSub && !selectedActive && selectedSub.layer !== "background") drawSub(normalizeSubtitle(selectedSub), fx);
     }
+  }
+  function drawBackgroundOverlays(t) {
+    const trackOrder = new Map(state.tracks.map((track, index) => [track.id, index]));
+    const backgrounds = state.subs
+      .map(normalizeSubtitle)
+      .filter((s) => s.type === "logo" && s.layer === "background" && t >= s.start && t <= s.end && s.img && s.img.complete)
+      .sort((a, b) => (trackOrder.get(a.trackId || "overlay-1") || 0) - (trackOrder.get(b.trackId || "overlay-1") || 0));
+    backgrounds.forEach((s) => drawCover(s.img));
+    return backgrounds.length > 0;
   }
   function staticSpectrum(t, out) {
     let amp = 0.25;
@@ -1086,18 +1156,15 @@
     applyAudioSettings();
   }
   function syncMedia(t) {
-    const videoClip = activeClipAt("video", t) || primaryClip("video");
-    if (videoClip) {
-      attachVideoClip(videoClip);
-      const local = clipLocalTime(videoClip, t);
-      const active = local >= 0 && local <= clipDuration(videoClip);
-      const want = (videoClip.trimStart || 0) + clamp(local, 0, clipDuration(videoClip));
-      if (Math.abs(el.video.currentTime - want) > 0.12) {
-        try { el.video.currentTime = want; } catch (_) {}
-      }
-      if (state.playing && active && el.video.paused) el.video.play().catch(() => {});
-      if ((!active || !state.playing) && !el.video.paused) el.video.pause();
-    }
+    const videoClips = activeClipsAt("video", t);
+    const activeVideoIds = new Set(videoClips.map((clip) => clip.id));
+    videoClips.forEach((clip) => syncVideoElementForClip(clip, t, state.playing));
+    Object.entries(refs.videoElements).forEach(([id, video]) => {
+      if (activeVideoIds.has(id)) return;
+      if (!video.paused) video.pause();
+    });
+    const primaryVideo = videoClips[0] || primaryClip("video");
+    if (primaryVideo) attachVideoClip(primaryVideo);
     const audioClip = activeClipAt("audio", t) || primaryClip("audio");
     if (audioClip) {
       attachAudioClip(audioClip);
@@ -1534,14 +1601,16 @@
         <button class="danger" id="deleteTrackBtn">Remove Track</button>
       `;
     } else if (sub) {
+      const isBackgroundLogo = sub.type === "logo" && sub.layer === "background";
       el.inspector.innerHTML = `
         <div class="section"><h3>${sub.type === "logo" ? "Logo" : "Subtitle"} Overlay</h3></div>
         <div class="row"><label>Track</label><select data-bind="sub.trackId">${overlayTracks().map((track) => `<option value="${track.id}" ${track.id === (sub.trackId || "overlay-1") ? "selected" : ""}>${escapeHtml(track.label)}</option>`).join("")}</select></div>
+        ${sub.type === "logo" ? `<div class="row"><label>Layer</label><select data-bind="sub.layer">${["overlay","background"].map((v) => `<option value="${v}" ${sub.layer === v ? "selected" : ""}>${v === "background" ? "Background" : "Overlay"}</option>`).join("")}</select></div>` : ""}
         ${sub.type === "text" ? textRow("Text", "sub.text", sub.text) : ""}
         <div class="two">${numberRow("In","sub.start",sub.start,0,999,.1)}${numberRow("Out","sub.end",sub.end,0,999,.1)}</div>
-        ${slider("Position X","sub.x",sub.x,0,1,.01,"%")}
-        ${slider("Position Y","sub.y",sub.y,0,1,.01,"%")}
-        ${sub.type === "logo" ? slider("Logo size","sub.size",sub.size,.05,.6,.01,"%") : `
+        ${isBackgroundLogo ? "" : slider("Position X","sub.x",sub.x,0,1,.01,"%")}
+        ${isBackgroundLogo ? "" : slider("Position Y","sub.y",sub.y,0,1,.01,"%")}
+        ${sub.type === "logo" ? (isBackgroundLogo ? `<div class="stats"><div><span>Background</span><b>Cover 100%</b></div></div>` : slider("Logo size","sub.size",sub.size,.05,.6,.01,"%")) : `
           <div class="row"><label>Font</label><select data-bind="sub.fontFamily">${SUBTITLE_FONTS.map((font) => `<option value="${escapeHtml(font.value)}" ${sub.fontFamily === font.value ? "selected" : ""}>${escapeHtml(font.label)}</option>`).join("")}</select></div>
           <div class="section compact"><h3>Style</h3>
             <div class="seg text-style">
@@ -1740,7 +1809,7 @@
     const path = target.dataset.bind || target.dataset.colorInput || "";
     const isText = target.tagName === "TEXTAREA";
     const isCheck = target.type === "checkbox";
-    const isString = isText || target.tagName === "SELECT" || path.endsWith(".text") || path.endsWith(".color") || path.endsWith("Color") || path.endsWith(".trackId") || path.endsWith(".effect") || path.endsWith(".align");
+    const isString = isText || target.tagName === "SELECT" || path.endsWith(".text") || path.endsWith(".color") || path.endsWith("Color") || path.endsWith(".trackId") || path.endsWith(".effect") || path.endsWith(".align") || path.endsWith(".layer");
     return isCheck ? target.checked : isString ? target.value : parseFloat(target.value) || 0;
   }
   function applyInspectorBinding(target, options) {
@@ -1753,6 +1822,14 @@
     }
     const value = inspectorValueForInput(target);
     setPath(path, value);
+    if (path === "sub.layer") {
+      const sub = state.subs.find((item) => item.id === state.selected && item.type === "logo");
+      if (sub && value === "background") {
+        sub.x = 0.5;
+        sub.y = 0.5;
+        sub.size = 1;
+      }
+    }
     updateInspectorValue(path, value);
     refresh({ inspector: false, projects: false });
     if (path === "sub.fontFamily") redrawSelectedSubtitleAfterFontChange(value);
@@ -2219,7 +2296,7 @@
       subtitleFx: state.subtitleFx,
       subs: state.subs.map((s) => {
         const sub = normalizeSubtitle(s);
-        return { id: sub.id, type: sub.type, text: sub.text, sourcePath: sub.sourcePath || "", url: sub.url || "", source: sub.source || null, start: sub.start, end: sub.end, trackId: sub.trackId, x: sub.x, y: sub.y, size: sub.size, color: sub.color, fontFamily: sub.fontFamily, fontWeight: sub.fontWeight, fontStyle: sub.fontStyle, effect: sub.effect, align: sub.align, background: sub.background, backgroundColor: sub.backgroundColor, backgroundOpacity: sub.backgroundOpacity };
+        return { id: sub.id, type: sub.type, text: sub.text, sourcePath: sub.sourcePath || "", url: sub.url || "", source: sub.source || null, start: sub.start, end: sub.end, trackId: sub.trackId, layer: sub.layer || "overlay", x: sub.x, y: sub.y, size: sub.size, color: sub.color, fontFamily: sub.fontFamily, fontWeight: sub.fontWeight, fontStyle: sub.fontStyle, effect: sub.effect, align: sub.align, background: sub.background, backgroundColor: sub.backgroundColor, backgroundOpacity: sub.backgroundOpacity };
       }),
       logoBlobs: includeBlobs ? Object.fromEntries(state.subs.filter((s) => s.type === "logo" && s.blob).map((s) => [s.id, s.blob])) : {}
     };
@@ -2291,6 +2368,7 @@
       audioClips: migrated.audioClips,
       subs: []
     });
+    pruneVideoElements();
     el.projectName.value = rec.name || "Untitled";
     el.bpmInput.value = snapshot.bpmInput || (state.bpm ? String(state.bpm) : "");
     syncLegacyMediaState();
@@ -2418,6 +2496,7 @@
       videoClips: migrated.videoClips,
       audioClips: migrated.audioClips
     });
+    pruneVideoElements();
     el.projectName.value = rec.name || "Untitled";
     el.bpmInput.value = state.bpm ? String(state.bpm) : "";
     syncLegacyMediaState();
@@ -2471,6 +2550,7 @@
     refs.audioBlobs = {};
     state.videoClips = (rec.videoClips || []).map(reviveVideoClip);
     state.audioClips = (rec.audioClips || []).map(reviveAudioClip);
+    pruneVideoElements();
     state.videoAudio = rec.videoAudio || state.videoAudio;
     state.musicAudio = rec.musicAudio || state.musicAudio;
     state.viz = rec.viz || state.viz;
@@ -2613,6 +2693,7 @@
   }
   function overlayBounds(sub) {
     const s = normalizeSubtitle(sub);
+    if (s.layer === "background") return { left: 2, right: 2, top: 2, bottom: 2 };
     if (s.type === "logo") {
       const w = Math.max(0.04, Number(s.size) || 0.22);
       const ratio = s.img && s.img.width && s.img.height ? s.img.height / s.img.width : 1;
@@ -2782,8 +2863,17 @@
       setStatus(`FFmpeg check failed: ${error.message || error}`);
     }
   }
-  function firstAudioForNativeExport() {
-    return state.audioClips.find((clip) => clip.sourcePath) || null;
+  function audioClipsForNativeExport() {
+    return state.audioClips
+      .filter((clip) => clip.sourcePath && !clip.muted && (Number(clip.volume ?? state.musicAudio.volume) || 0) > 0 && clipDuration(clip) > 0)
+      .sort((a, b) => (a.start || 0) - (b.start || 0))
+      .map((clip) => ({
+        path: clip.sourcePath,
+        start: Math.max(0, Number(clip.start) || 0),
+        trimStart: Math.max(0, Number(clip.trimStart) || 0),
+        trimEnd: Math.max(0, Number(clip.trimEnd ?? clip.duration) || 0),
+        volume: clamp(Number(clip.volume ?? state.musicAudio.volume) || 0, 0, 1)
+      }));
   }
   function waitForMediaSeek(media, target, timeout) {
     if (!media || !media.src) return Promise.resolve();
@@ -2813,7 +2903,7 @@
     if (duration() <= 0) { setStatus("Import media before exporting."); return true; }
     const fps = clamp(Number(state.nativeExport.fps) || 30, 12, 60);
     const totalFrames = Math.max(1, Math.ceil(duration() * fps));
-    const audioClip = firstAudioForNativeExport();
+    const audioClips = audioClipsForNativeExport();
     let removeProgressListener = null;
     try {
       showExportModal("Export MP4");
@@ -2839,8 +2929,12 @@
         const t = Math.min(duration(), i / fps);
         state.time = t;
         syncMedia(t);
-        const videoClip = activeClipAt("video", t);
-        if (videoClip) await waitForMediaSeek(el.video, (videoClip.trimStart || 0) + clamp(clipLocalTime(videoClip, t), 0, clipDuration(videoClip)), 900);
+        const videoClips = activeClipsAt("video", t);
+        await Promise.all(videoClips.map((clip) => {
+          const video = syncVideoElementForClip(clip, t, false);
+          const target = (clip.trimStart || 0) + clamp(clipLocalTime(clip, t), 0, clipDuration(clip));
+          return waitForMediaSeek(video, target, 900);
+        }));
         renderFrame(t);
         await window.pacekeeper.writeNativeExportFrame(session, i, await stagePngBytes());
         if (i % Math.max(1, Math.round(fps)) === 0 || i === totalFrames - 1) {
@@ -2859,8 +2953,8 @@
         crf: clamp(Number(state.nativeExport.crf) || 18, 12, 30),
         preset: state.nativeExport.preset || "medium",
         audioBitrate: state.nativeExport.audioBitrate || "192k",
-        audioPath: audioClip ? audioClip.sourcePath : "",
-        audioStart: audioClip ? audioClip.start || 0 : 0
+        duration: duration(),
+        audioClips
       });
       setStatus(`Native MP4 export complete: ${result.outputPath}`);
       completeExportModal(`Export complete: ${result.outputPath}`);
@@ -2966,6 +3060,7 @@
     $("newProjectBtn").onclick = () => {
       stop();
       state.id = null; state.video = null; state.audio = null; state.videoClips = []; state.audioClips = []; state.tracks = defaultTracks(); state.videoTrackId = "video"; state.audioTrackId = "audio"; state.videoOffset = 0; state.audioOffset = 0; state.videoAudio = { muted: true, volume: 0.8 }; state.musicAudio = { muted: false, volume: 1 }; state.subtitleFx = { effect: "none", shadow: true, background: false, align: "center" }; state.subs = []; state.selected = null; state.selectedClipId = null; state.flash = null; state.bpm = 0; state.bpmSections = []; state.time = 0; state.trim = { start: 0, end: 0 };
+      pruneVideoElements();
       refs.videoBlob = null; refs.audioBlob = null; refs.videoBlobs = {}; refs.audioBlobs = {}; refs.activeVideoClipId = null; refs.activeAudioClipId = null; el.video.removeAttribute("src"); el.audio.removeAttribute("src"); el.projectName.value = "Untitled";
       setStatus("New project.");
       refresh();
