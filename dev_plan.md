@@ -2,6 +2,27 @@
 
 ## 변경 기록
 
+### 2026-06-04
+
+- Projects 썸네일 스크롤바 제거 및 버전 증가: Projects 썸네일 목록 오른쪽에 표시되던 custom navigator thumb를 제거했다. 목록은 native scrollbar를 숨긴 상태로 유지하고, 위/아래 chevron hint와 mouse wheel scroll만 남겨 시각적으로 스크롤바가 보이지 않도록 정리했다. 앱 버전은 `0.3.7`로 올리고 CSS/JS cache query를 `20260604-project-scrollbar-remove-037`로 갱신했다.
+- Project save 확인/Export progress modal 구현 및 버전 증가: 좌측 Projects 썸네일로 연 프로젝트를 같은 이름으로 저장하려는 경우 즉시 새 항목을 만들지 않고 `Save Project` 확인 모달을 띄우도록 변경했다. `YES`는 현재 프로젝트 ID로 overwrite 저장하고, `NO`/닫기는 저장을 취소한다. 프로젝트 이름을 변경한 상태에서 Save하면 기존 정책대로 새 프로젝트 항목으로 저장된다. Export는 native FFmpeg/브라우저 WebM 공통 진행 모달을 추가해 진행률과 남은 시간을 표시하고, 진행 중에는 `CANCEL`, 완료 또는 취소 후에는 `CLOSE` 버튼을 표시한다. 브라우저 WebM export는 cancel 시 다운로드를 생성하지 않으며, native export는 frame rendering loop에서 cancel 요청을 감지하고 FFmpeg 인코딩 중에는 main process의 active FFmpeg child process를 종료해 중단한다. 앱 버전은 `0.3.6`으로 올리고 CSS/JS cache query를 `20260604-save-export-modal-036`으로 갱신했다.
+- Undo/Redo 10단계 구현 및 버전 증가: renderer에 최대 10단계 `historyPast`/`historyFuture` stack을 추가하고, `projectRecord(true)` 기반 상태 스냅샷으로 편집 상태를 복원하도록 했다. topbar에 `Undo`/`Redo` 버튼을 추가하고, `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z` 단축키를 연결했다. history 대상은 import, subtitle/logo/track 추가, clip/track/subtitle 삭제, clip trim/move, subtitle/overlay drag, Inspector 입력/색상/스타일 변경, BPM input/Tap 변경이다. slider/drag는 조작 시작 시 한 번만 기록해 history가 과도하게 쌓이지 않도록 했다. 프로젝트 open/load/new는 프로젝트 경계가 바뀌므로 history를 초기화한다. 앱 버전은 `0.3.5`로 올리고 CSS/JS cache query를 `20260604-undo-redo-035`로 갱신했다.
+- Project/Track/Color/BPM UI 정리 및 버전 증가: 프로젝트 썸네일 카드가 목록 높이에 맞춰 압축되어 이름이 사라지지 않도록 카드 최소 높이와 flex shrink 방지를 추가했다. Projects 목록은 기존 Track Label 방식처럼 목록 영역 안에서만 스크롤된다. 하단 Track label 영역에도 wheel 이벤트를 연결해 label 위에서 위/아래 스크롤해도 timeline track viewport가 같이 이동하도록 했다. RGB 색상 선택은 앱 내부 `Select Color` 모달로 열고, 색상 변경 후 `OK`로 닫을 수 있게 했으며 `CANCEL`/닫기는 기존 색상으로 되돌린다. 상단 `BPM` toggle, BPM lane, Canvas BPM overlay, BPM Inspector/BPM Logo 생성 노출은 제거하고, BPM 수동 입력과 `Tap` tempo 기능은 유지했다. 앱 버전은 `0.3.4`로 올리고 CSS/JS cache query를 `20260604-project-scroll-color-bpm-034`로 갱신했다.
+- Project switch/save UX/버전 증가: 좌측 Projects 썸네일을 눌러 다른 프로젝트를 열 때 현재 작업이 저장 이후 변경된 상태라면 `Save Project?` 확인 모달을 표시하도록 변경했다. `YES`는 현재 작업을 새 프로젝트 ID로 저장한 뒤 선택한 프로젝트를 열고, `NO`는 저장하지 않고 전환하며, `CANCEL`은 전환을 취소한다. `Save` 버튼도 기존 썸네일 프로젝트를 덮어쓰지 않고 항상 새 저장본을 만들도록 바꿔, 이전 프로젝트를 남긴 상태로 새 버전을 저장할 수 있게 했다. 앱 버전은 `0.3.3`으로 올리고 CSS/JS cache query를 `20260604-project-switch-save-033`으로 갱신했다.
+- Projects 스크롤 UX/버전 증가: 좌측 Projects 패널에서 `Projects` 타이틀, 프로젝트명 입력, Save/Open 버튼은 고정하고, 아래 프로젝트 썸네일 목록만 별도 스크롤되도록 구조를 변경했다. 썸네일 목록은 Track Label 스크롤 방식과 맞춰 native scrollbar를 숨기고, 위/아래 chevron hint와 오른쪽 navigator thumb를 표시한다. mouse wheel은 썸네일 목록 영역 안에서 세로 이동만 처리하며, navigator drag로 빠르게 이동할 수 있다. 앱 버전은 `0.3.2`로 올리고 CSS/JS cache query를 `20260604-project-list-scroll-032`로 갱신했다.
+- 프로젝트 삭제/자막 폰트/버전 증가: 좌측 Projects 썸네일 카드 오른쪽 상단에 `x` 삭제 버튼을 추가했다. 삭제 버튼을 누르면 YES/NO 확인 모달이 열리고, YES 선택 시 IndexedDB `projects` store에서 해당 프로젝트를 삭제한 뒤 목록을 갱신한다. 자막 Font 드롭다운에는 Imperial Script, Google Sans, Raleway, Kings, Snowburst One, Bitcount Grid Single, Story Script, Uncial Antiqua, Tapestry, Audiowide, Tektur, Dongle, Orbit, Asta Sans, Gowun Batang을 추가했다. Google Fonts stylesheet를 `index.html`에 연결했으며, Google Sans는 Google Fonts CSS API에 없는 경우를 고려해 `Google Sans, Product Sans, Arial, sans-serif` fallback으로 등록한다. 새 자막의 font style 기본값은 Normal(`fontWeight: 400`, `fontStyle: normal`)로 변경했다. 앱 버전은 `0.3.1`로 올리고 CSS/JS cache query를 `20260604-project-delete-fonts-031`로 갱신했다.
+- Native FFmpeg export 1차/버전 증가: Electron main/preload/renderer에 native FFmpeg export 골격을 추가했다. renderer는 Canvas preview를 FPS 기준 PNG frame sequence로 임시 폴더에 저장하고, main process가 FFmpeg를 실행해 MP4/H.264(`libx264`, `yuv420p`, CRF, preset)로 인코딩한다. Electron Inspector 기본 화면에는 FPS, CRF, preset, audio bitrate, FFmpeg 선택 버튼을 추가했다. FFmpeg 경로는 `Select FFmpeg`로 선택하거나 `FFMPEG_PATH`/PATH `ffmpeg`를 사용할 수 있고, userData settings에 저장된다. 첫 번째 `sourcePath` audio clip은 AAC audio input으로 연결하며, audio clip start가 0보다 크면 `adelay`를 적용한다. 아직 다중 audio mix, audio trim, export cancel, 원본 해상도 선택, headless renderer 분리는 후속 작업으로 남긴다. 앱 버전은 `0.3.0`으로 올리고 CSS/JS cache query를 `20260604-native-export-030`으로 갱신했다.
+- Electron 빌드 설정 정리: `package.json`의 기본 Windows artifactName이 nsis/portable에서 같은 이름을 사용할 수 있던 문제를 정리했다. `nsis.artifactName`은 `${productName}-${version}-${arch}-Setup.${ext}`, `portable.artifactName`은 `${productName}-${version}-${arch}-Portable.${ext}`로 분리했다.
+- Electron v0.3.0 빌드 검증: 별도 `release-0.3.0` 출력 폴더로 electron-builder 빌드를 실행해 artifactName 분리 설정과 native export 변경이 포함된 패키징을 확인했다. 산출물은 `PaceKeeper Movie Maker-0.3.0-x64-Setup.exe`, `PaceKeeper Movie Maker-0.3.0-x64-Portable.exe`, `win-unpacked`이다. 앱 icon은 아직 설정되지 않아 기본 Electron icon이 사용된다.
+- 진행 계획: Native FFmpeg export로 넘어가기 전에 하단 Track 창 스크롤 UX를 먼저 정리한다. 사용자가 제안한 A+C 조합을 적용해 기본 수평/수직 스크롤바는 숨기되 실제 scroll state는 유지하고, 오른쪽에 얇은 Track Navigator를 추가해 현재 보이는 track 범위와 전체 track 위치를 표시한다. 마우스 wheel은 일반 wheel=세로 track 이동, `Shift + wheel`=timeline 좌우 이동, `Ctrl/Alt/Meta + wheel`=zoom으로 분리해 수평/수직이 동시에 움직이는 느낌을 줄인다.
+- UI 스크롤 UX/버전 증가: Track 창 A+C 조합을 1차 반영했다. native 수평/수직 스크롤바는 숨기고 내부 scroll state는 유지하며, 오른쪽 `Track Navigator` thumb로 현재 보이는 track 범위를 표시하고 drag로 세로 이동할 수 있게 했다. wheel 동작은 일반 wheel=세로 track 이동, `Shift + wheel`=timeline 좌우 이동, `Ctrl/Alt/Meta + wheel`=zoom으로 분리했다. 앱 버전은 `0.2.7`로 올리고 CSS/JS cache query를 `20260603-track-navigator-027`로 갱신했다. 남은 수동 확인은 최초 로딩 시 scrollbar 비노출, video/audio import 후 Fit/zoom in/out 시 navigator 표시 안정성, wheel modifier 동작이다.
+- UI 스크롤 힌트 보강: 좌측 Track label 영역에 위/아래에 더 볼 track이 있을 때만 표시되는 화살표 오버레이를 추가했다. 처음에는 pseudo-element 방식으로 추가했지만 시인성을 높이기 위해 `trackHintTop`/`trackHintBottom` DOM 요소로 분리했다. 각 hint는 gradient band와 원형 chevron pill을 함께 표시하고, timeline scrollTop 기준으로 `hidden` 상태가 자동 토글된다. 기본 track 높이는 유지하며 CSS/JS cache query는 `20260603-track-hint-dom-027`로 갱신했다.
+- UI 스크롤 힌트 버그 수정: `renderTimeline()`이 좌측 `laneLabels.innerHTML`을 통째로 갱신하면서 `trackHintTop`/`trackHintBottom` DOM이 삭제되어 화살표가 보이지 않던 문제를 수정했다. 이제 `ruler-gap`과 `lane-labels-content`만 교체하고 hint DOM은 보존한다. CSS/JS cache query는 `20260603-track-hint-dom-fix-027`로 갱신했다.
+- UI 스크롤 힌트 경계 보정: Track label 화살표는 최상단에서는 위쪽 hint를 숨기고, 최하단에서는 아래쪽 hint를 숨기도록 경계 판정을 명확히 했다. `maxScroll`이 없으면 양쪽 hint가 모두 숨겨지며, 브라우저 소수점 scroll 오차를 고려해 1px tolerance를 둔다. CSS/JS cache query는 `20260603-track-hint-edge-027`로 갱신했다.
+- UI 스크롤 힌트 판정 재보정: 전체 `timelineScroll.scrollHeight - clientHeight` 기준은 sticky ruler 높이와 내부 여백 때문에 실제 Track row가 모두 보이는 상태에서도 overflow가 있는 것으로 오판했다. hint 표시 기준을 `state.tracks.length * --lane-h`와 `timelineScroll.clientHeight - --ruler-h`로 계산하는 Track row 전용 overflow 판정으로 변경했다. CSS/JS cache query는 `20260603-track-hint-row-027`로 갱신했다.
+- UI 스크롤 힌트 hidden 표시 수정: JS에서 `trackHintTop`/`trackHintBottom`의 `hidden` 속성은 토글되고 있었지만, `.track-scroll-hint { display: grid; }` CSS가 브라우저 기본 `[hidden] { display: none; }`보다 우선되어 숨김 상태에서도 화살표가 계속 보였다. `.track-scroll-hint[hidden] { display: none; }`을 명시해 최상단/최하단 숨김 동작이 실제 표시에도 반영되도록 했다. CSS/JS cache query는 `20260603-track-hint-hidden-027`로 갱신했다.
+- Electron 빌드 기록: 기본 `npm.cmd run dist`는 기존 `release\win-unpacked\resources\app.asar` 파일 잠금 때문에 실패했다. 기존 release 폴더를 삭제하지 않고 `release-0.2.7` 별도 출력 폴더로 빌드해 `PaceKeeper Movie Maker-0.2.7-x64-Setup.exe`와 `PaceKeeper Movie Maker-0.2.7-x64-Portable.exe` 산출물을 생성했다. 현재 package 설정의 기본 artifactName은 nsis/portable이 같은 이름을 사용할 수 있으므로, 이번 빌드는 target별 artifactName override로 구분했다.
+
 ### 2026-06-03
 
 - UI 후속 개선/버전 증가: 남은 수동 확인 3개(`.pkmm.json` 저장/불러오기, 밝은 회색 ruler, 선택 강조 일관성)가 확인 완료되었다. Timeline 선택 상태를 clip 단위까지 명확히 하기 위해 `selectedClipId`를 추가하고, video/audio clip 클릭/드래그 시 Inspector가 해당 clip을 대상으로 보도록 정리했다. import/delete/drag/track 추가 후에는 짧은 flash highlight를 표시해 방금 바뀐 block 또는 lane을 쉽게 확인할 수 있게 했다. 앱 버전은 `0.2.6`으로 올리고 CSS/JS cache query를 `20260603-selection-flash-026`으로 갱신했다.
@@ -53,6 +74,8 @@
 
 ### 2026-06-02
 
+- 버그 수정/패키징: 브라우저에서는 정상 동작하지만 Electron 빌드 결과에서 일부 기능이 깨질 수 있는 원인으로 `package.json`의 build files 목록에 `assets/**/*`가 빠져 있던 문제를 수정했다. BPM PNG 아이콘 등 renderer가 상대 경로로 참조하는 asset이 빌드 산출물에 포함되도록 했다.
+- 진단 기능 추가: Electron 앱에서만 문제가 발생할 때 콘솔 에러를 확인할 수 있도록 `PACEKEEPER_DEVTOOLS=1` 환경변수로 실행하면 DevTools가 열리도록 main process에 옵션을 추가했다.
 - 품질 노트 추가: Electron 구조 자체는 고화질 최종 동영상 생성에 문제가 없지만, 현재 Canvas `MediaRecorder` 기반 WebM export는 미리보기/검증용으로만 취급해야 한다. 최종 결과물은 원본 영상/오디오를 기반으로 native FFmpeg export를 사용해 H.264/H.265, AAC, CRF, preset, 해상도, bitrate를 직접 제어해야 화질 저하를 줄일 수 있다.
 - 미해결 버그 기록: `Video Track 1`에 영상을 로딩한 뒤 `Video Track 2`에 다른 영상을 로딩하면 Track 1의 영상이 삭제되고 Track 2 영상만 남는다. 현재 내부 구조가 단일 `state.video`/`state.audio` 중심이라 track별 media clip 배열로 확장해야 한다. Audio track도 동일하게 `state.audio` 단일 구조 때문에 같은 문제가 발생한다.
 - 개선 요청 기록: 영상/음악 import 시 현재 play bar 위치를 무시하고 항상 timeline 0초부터 로딩된다. import 시점의 `state.time`을 기본 clip start로 사용해 playhead 위치부터 배치되도록 변경해야 한다.
@@ -776,7 +799,7 @@ node --check src/preload/preload.js
 
 ## 14. 버전 표기
 
-현재 앱 버전: `0.2.6`
+현재 앱 버전: `0.3.7`
 
 버전 표시 위치:
 

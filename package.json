@@ -1,7 +1,8 @@
 {
   "name": "pacekeeper-movmaker",
-  "version": "0.2.6",
+  "version": "0.3.7",
   "private": true,
+  "author": "RoseWorks",
   "description": "PaceKeeper Movie Maker desktop-ready video editor prototype",
   "main": "src/main/main.js",
   "scripts": {
@@ -18,20 +19,24 @@
     "files": [
       "index.html",
       "src/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "win": {
       "target": [
         "nsis",
         "portable"
-      ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      ]
     },
     "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-Portable.${ext}"
     }
   },
   "devDependencies": {

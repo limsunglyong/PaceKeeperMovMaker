@@ -4,7 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PaceKeeper Movie Maker</title>
-  <link rel="stylesheet" href="src/renderer/app.css?v=20260603-selection-flash-026" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Asta+Sans:wght@400;700&family=Audiowide&family=Bitcount+Grid+Single&family=Dongle:wght@400;700&family=Gowun+Batang:wght@400;700&family=Imperial+Script&family=Kings&family=Orbit&family=Raleway:wght@400;700&family=Snowburst+One&family=Story+Script&family=Tapestry&family=Tektur:wght@400;700&family=Uncial+Antiqua&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/renderer/app.css?v=20260604-project-scrollbar-remove-037" />
 </head>
 <body>
   <div id="app">
@@ -12,7 +15,7 @@
       <div class="brand">
         <span class="mark"></span>
         <div>
-          <span class="brand-title"><strong>PaceKeeper</strong><span class="app-version">v0.2.6</span></span>
+          <span class="brand-title"><strong>PaceKeeper</strong><span class="app-version">v0.3.7</span></span>
           <small>Movie Maker</small>
         </div>
       </div>
@@ -26,6 +29,10 @@
           <span id="timecode">00:00:00</span>
           <small id="duration">DUR 00:00:00</small>
         </div>
+      </div>
+      <div class="history-actions" aria-label="Edit history">
+        <button id="undoBtn" class="icon-btn" title="Undo" disabled>Undo</button>
+        <button id="redoBtn" class="icon-btn" title="Redo" disabled>Redo</button>
       </div>
       <button id="exportBtn" class="export-btn">Export</button>
     </header>
@@ -41,7 +48,11 @@
           <button id="saveProjectBtn">Save</button>
           <button id="loadFileBtn">Open</button>
         </div>
-        <div id="projectList" class="project-list"></div>
+        <div id="projectListWrap" class="project-list-wrap">
+          <div id="projectList" class="project-list"></div>
+          <span id="projectHintTop" class="project-scroll-hint top" hidden aria-hidden="true"><b>&#9650;</b></span>
+          <span id="projectHintBottom" class="project-scroll-hint bottom" hidden aria-hidden="true"><b>&#9660;</b></span>
+        </div>
       </aside>
 
       <section class="center">
@@ -58,7 +69,6 @@
           <button id="addTrackBtn">Add Track</button>
           <span class="divider"></span>
           <button id="vizBtn" class="toggle is-on">Visualizer</button>
-          <button id="bpmBtn" class="toggle">BPM</button>
           <label class="mini-field">BPM <input id="bpmInput" type="number" min="40" max="240" placeholder="120" /></label>
           <button id="tapBtn">Tap</button>
         </div>
@@ -71,12 +81,18 @@
     </main>
 
     <section class="timeline">
-      <div id="laneLabels" class="lane-labels"></div>
+      <div id="laneLabels" class="lane-labels">
+        <span id="trackHintTop" class="track-scroll-hint top" hidden aria-hidden="true"><b>▲</b></span>
+        <span id="trackHintBottom" class="track-scroll-hint bottom" hidden aria-hidden="true"><b>▼</b></span>
+      </div>
       <div id="timelineScroll" class="timeline-scroll">
         <div id="timelineInner" class="timeline-inner">
           <div id="ruler" class="ruler"></div>
           <div id="playhead" class="playhead"></div>
         </div>
+      </div>
+      <div id="trackNavigator" class="track-navigator" hidden>
+        <span id="trackNavigatorThumb"></span>
       </div>
       <footer class="statusbar">
         <span id="status">Ready. Import a video and an audio file to begin.</span>
@@ -115,7 +131,76 @@
         </div>
       </div>
     </div>
+    <div id="deleteProjectModal" class="modal-backdrop" hidden>
+      <div class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="deleteProjectTitle">
+        <div class="modal-head">
+          <h2 id="deleteProjectTitle">Delete Project</h2>
+          <button id="deleteProjectCancelTop" title="Close">x</button>
+        </div>
+        <p id="deleteProjectText">Delete this project?</p>
+        <div class="confirm-actions">
+          <button id="deleteProjectYes" class="danger">YES</button>
+          <button id="deleteProjectNo">NO</button>
+        </div>
+      </div>
+    </div>
+    <div id="switchProjectModal" class="modal-backdrop" hidden>
+      <div class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="switchProjectTitle">
+        <div class="modal-head">
+          <h2 id="switchProjectTitle">Save Project?</h2>
+          <button id="switchProjectCancelTop" title="Close">x</button>
+        </div>
+        <p id="switchProjectText">Save the current project before opening another one?</p>
+        <div class="confirm-actions three">
+          <button id="switchProjectYes">YES</button>
+          <button id="switchProjectNo">NO</button>
+          <button id="switchProjectCancel">CANCEL</button>
+        </div>
+      </div>
+    </div>
+    <div id="saveProjectModal" class="modal-backdrop" hidden>
+      <div class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="saveProjectTitle">
+        <div class="modal-head">
+          <h2 id="saveProjectTitle">Save Project</h2>
+          <button id="saveProjectCancelTop" title="Close">x</button>
+        </div>
+        <p id="saveProjectText">Overwrite this project?</p>
+        <div class="confirm-actions">
+          <button id="saveProjectYes">YES</button>
+          <button id="saveProjectNo">NO</button>
+        </div>
+      </div>
+    </div>
+    <div id="exportModal" class="modal-backdrop" hidden>
+      <div class="modal export-modal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle">
+        <div class="modal-head">
+          <h2 id="exportModalTitle">Export</h2>
+        </div>
+        <p id="exportModalText">Preparing export...</p>
+        <div class="export-progress"><span id="exportProgressBar"></span></div>
+        <div class="stats">
+          <div><span>Remaining</span><b id="exportRemaining">--:--</b></div>
+        </div>
+        <div class="confirm-actions">
+          <button id="exportCancel">CANCEL</button>
+          <button id="exportClose" hidden>CLOSE</button>
+        </div>
+      </div>
+    </div>
+    <div id="colorModal" class="modal-backdrop" hidden>
+      <div class="modal color-modal" role="dialog" aria-modal="true" aria-labelledby="colorModalTitle">
+        <div class="modal-head">
+          <h2 id="colorModalTitle">Select Color</h2>
+          <button id="colorModalClose" title="Close">x</button>
+        </div>
+        <input id="colorModalInput" type="color" value="#ffffff" aria-label="Selected color" />
+        <div class="confirm-actions">
+          <button id="colorModalOk">OK</button>
+          <button id="colorModalCancel">CANCEL</button>
+        </div>
+      </div>
+    </div>
   </div>
-  <script src="src/renderer/app.js?v=20260603-selection-flash-026"></script>
+  <script src="src/renderer/app.js?v=20260604-project-scrollbar-remove-037"></script>
 </body>
 </html>

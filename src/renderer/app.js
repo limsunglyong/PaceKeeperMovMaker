@@ -4,9 +4,25 @@
   const CW = 1280;
   const CH = 720;
   const FFT = 512;
+  const HISTORY_LIMIT = 10;
   const COLORS = ["#ffffff", "#ff4d5e", "#2dd4bf", "#ffb020", "#a78bfa", "#5b8cff"];
   const SUBTITLE_FONTS = [
     { label: "Inter", value: "Inter, Segoe UI, Arial, sans-serif" },
+    { label: "Imperial Script", value: "Imperial Script, cursive" },
+    { label: "Google Sans", value: "Google Sans, Product Sans, Arial, sans-serif" },
+    { label: "Raleway", value: "Raleway, Inter, Segoe UI, sans-serif" },
+    { label: "Kings", value: "Kings, cursive" },
+    { label: "Snowburst One", value: "Snowburst One, cursive" },
+    { label: "Bitcount Grid Single", value: "Bitcount Grid Single, monospace" },
+    { label: "Story Script", value: "Story Script, cursive" },
+    { label: "Uncial Antiqua", value: "Uncial Antiqua, serif" },
+    { label: "Tapestry", value: "Tapestry, serif" },
+    { label: "Audiowide", value: "Audiowide, sans-serif" },
+    { label: "Tektur", value: "Tektur, sans-serif" },
+    { label: "Dongle", value: "Dongle, sans-serif" },
+    { label: "Orbit", value: "Orbit, sans-serif" },
+    { label: "Asta Sans", value: "Asta Sans, sans-serif" },
+    { label: "Gowun Batang", value: "Gowun Batang, serif" },
     { label: "Arial", value: "Arial, Helvetica, sans-serif" },
     { label: "Segoe UI", value: "Segoe UI, Arial, sans-serif" },
     { label: "Georgia", value: "Georgia, Times New Roman, serif" },
@@ -44,12 +60,21 @@
     lamp: $("liveLamp"),
     play: $("playBtn"),
     export: $("exportBtn"),
+    undo: $("undoBtn"),
+    redo: $("redoBtn"),
     projectName: $("projectName"),
+    projectListWrap: $("projectListWrap"),
     projectList: $("projectList"),
+    projectHintTop: $("projectHintTop"),
+    projectHintBottom: $("projectHintBottom"),
     inspector: $("inspectorBody"),
     timelineScroll: $("timelineScroll"),
     timelineInner: $("timelineInner"),
     laneLabels: $("laneLabels"),
+    trackHintTop: $("trackHintTop"),
+    trackHintBottom: $("trackHintBottom"),
+    trackNavigator: $("trackNavigator"),
+    trackNavigatorThumb: $("trackNavigatorThumb"),
     ruler: $("ruler"),
     playhead: $("playhead"),
     videoInput: $("videoInput"),
@@ -58,9 +83,36 @@
     projectInput: $("projectInput"),
     bpmInput: $("bpmInput"),
     vizBtn: $("vizBtn"),
-    bpmBtn: $("bpmBtn"),
     trackModal: $("trackModal"),
-    trackModalClose: $("trackModalClose")
+    trackModalClose: $("trackModalClose"),
+    deleteProjectModal: $("deleteProjectModal"),
+    deleteProjectText: $("deleteProjectText"),
+    deleteProjectYes: $("deleteProjectYes"),
+    deleteProjectNo: $("deleteProjectNo"),
+    deleteProjectCancelTop: $("deleteProjectCancelTop"),
+    switchProjectModal: $("switchProjectModal"),
+    switchProjectText: $("switchProjectText"),
+    switchProjectYes: $("switchProjectYes"),
+    switchProjectNo: $("switchProjectNo"),
+    switchProjectCancel: $("switchProjectCancel"),
+    switchProjectCancelTop: $("switchProjectCancelTop"),
+    saveProjectModal: $("saveProjectModal"),
+    saveProjectText: $("saveProjectText"),
+    saveProjectYes: $("saveProjectYes"),
+    saveProjectNo: $("saveProjectNo"),
+    saveProjectCancelTop: $("saveProjectCancelTop"),
+    exportModal: $("exportModal"),
+    exportModalTitle: $("exportModalTitle"),
+    exportModalText: $("exportModalText"),
+    exportRemaining: $("exportRemaining"),
+    exportProgressBar: $("exportProgressBar"),
+    exportCancel: $("exportCancel"),
+    exportClose: $("exportClose"),
+    colorModal: $("colorModal"),
+    colorModalInput: $("colorModalInput"),
+    colorModalOk: $("colorModalOk"),
+    colorModalCancel: $("colorModalCancel"),
+    colorModalClose: $("colorModalClose")
   };
   const ctx = el.stage.getContext("2d");
 
@@ -69,9 +121,14 @@
       { id: "video", label: "Video", type: "video", color: "#5b8cff", locked: true },
       { id: "audio", label: "Audio", type: "audio", color: "#2dd4bf", locked: true },
       { id: "viz", label: "Visualizer", type: "viz", color: "#a78bfa", locked: true },
-      { id: "overlay-1", label: "Overlay 1", type: "overlay", color: "#ffb020" },
-      { id: "bpm", label: "BPM", type: "bpm", color: "#ff4d5e", locked: true }
+      { id: "overlay-1", label: "Overlay 1", type: "overlay", color: "#ffb020" }
     ];
+  }
+  function normalizeTracks(tracks) {
+    const list = (tracks && tracks.length ? tracks : defaultTracks())
+      .filter((track) => track.type !== "bpm" && track.id !== "bpm" && track.label !== "BPM Logo");
+    if (!list.some((track) => track.type === "overlay")) list.push({ id: "overlay-1", label: "Overlay 1", type: "overlay", color: "#ffb020" });
+    return list;
   }
 
   const state = {
@@ -92,6 +149,7 @@
     bpm: 0,
     bpmSections: [],
     bpmOv: { enabled: false, x: 0.88, y: 0.13, color: "#ff4d5e", offset: 0, imageSet: "color", showIcon: true, showLabel: true, showNumber: false },
+    nativeExport: { fps: 30, crf: 18, preset: "medium", audioBitrate: "192k", ffmpegPath: "", ffmpegVersion: "" },
     subtitleFx: { effect: "none", shadow: true, background: false, align: "center" },
     tracks: defaultTracks(),
     subs: [],
@@ -102,7 +160,12 @@
     playing: false,
     exporting: false,
     pxPerSec: 48,
-    projects: []
+    projects: [],
+    pendingDeleteProjectId: null,
+    pendingSwitchProjectId: null,
+    cleanProjectSnapshot: "",
+    pendingColorPath: "",
+    pendingColorOriginal: ""
   };
 
   const refs = {
@@ -123,6 +186,13 @@
     activeVideoClipId: null,
     activeAudioClipId: null,
     flashTimer: 0,
+    trackNavigatorDrag: null,
+    historyPast: [],
+    historyFuture: [],
+    historyRestoring: false,
+    exportCancelRequested: false,
+    exportCompleted: false,
+    exportStartedAt: 0,
     tap: [],
     waveCanvas: null,
     bpmImages: {}
@@ -289,9 +359,7 @@
       type: "overlay",
       color: count % 2 ? "#ffb020" : "#a78bfa"
     };
-    const bpmIndex = state.tracks.findIndex((item) => item.id === "bpm");
-    if (bpmIndex >= 0) state.tracks.splice(bpmIndex, 0, track);
-    else state.tracks.push(track);
+    state.tracks.push(track);
     return track.id;
   }
   function addMediaTrack(type) {
@@ -302,7 +370,7 @@
       type,
       color: type === "video" ? "#5b8cff" : "#2dd4bf"
     };
-    const insertBefore = state.tracks.findIndex((item) => item.type === "viz" || item.type === "overlay" || item.type === "bpm");
+    const insertBefore = state.tracks.findIndex((item) => item.type === "viz" || item.type === "overlay");
     if (insertBefore >= 0) state.tracks.splice(insertBefore, 0, track);
     else state.tracks.push(track);
     return track.id;
@@ -322,10 +390,12 @@
         setStatus("Keep at least one overlay track.");
         return false;
       }
+      pushHistory("Remove track");
       flashTrackId = fallback.id;
       state.subs.forEach((sub) => { if (sub.trackId === removeId) sub.trackId = fallback.id; });
       setStatus("Removed overlay track. Existing items moved to the next overlay track.");
     } else {
+      pushHistory("Remove track");
       const removedClipCount = track.type === "video"
         ? state.videoClips.filter((clip) => clip.trackId === removeId).length
         : state.audioClips.filter((clip) => clip.trackId === removeId).length;
@@ -378,6 +448,7 @@
     const audioClip = state.audioClips.find((clip) => clip.id === clipId);
     const clip = videoClip || audioClip;
     if (!clip) return false;
+    pushHistory("Remove clip");
     if (videoClip) {
       state.videoClips = state.videoClips.filter((item) => item.id !== clipId);
       delete refs.videoBlobs[clipId];
@@ -525,7 +596,7 @@
     out.size = Number.isFinite(parseFloat(out.size)) && parseFloat(out.size) > 0 ? parseFloat(out.size) : (out.type === "logo" ? 0.22 : 56);
     out.color = out.color || "#ffffff";
     out.fontFamily = out.fontFamily || SUBTITLE_FONTS[0].value;
-    out.fontWeight = out.fontWeight || "800";
+    out.fontWeight = out.fontWeight || "400";
     out.fontStyle = out.fontStyle || "normal";
     if (out.type === "text" && out.background == null) out.background = true;
     return out;
@@ -783,7 +854,6 @@
       else staticSpectrum(audioLocal, refs.freq);
       drawViz(refs.freq);
     }
-    if (state.bpmOv.enabled && (state.bpm > 0 || (state.bpmSections && state.bpmSections.length))) drawBpm(t);
     drawActiveSubtitles(t, fx);
   }
   function drawActiveSubtitles(t, fx) {
@@ -876,61 +946,6 @@
     }
     ctx.restore();
   }
-  function drawBpm(t) {
-    const cfg = state.bpmOv;
-    const bpm = currentBpmAt(t);
-    if (!bpm || bpm <= 0) return;
-    const activeLevel = bpmLevelFor(bpm);
-    const interval = 60 / bpm;
-    const audio = primaryClip("audio");
-    const phase = ((t - (audio ? audio.start : 0) - cfg.offset) % interval + interval) % interval;
-    const pulse = Math.max(0, 1 - phase / interval * 3.2);
-    const cx = cfg.x * CW;
-    const cy = cfg.y * CH;
-    const iconSize = 44;
-    const activeBoost = 10 + pulse * 7;
-    const gap = 18;
-    const total = BPM_LEVELS.length * iconSize + (BPM_LEVELS.length - 1) * gap;
-    const startX = cx - total / 2 + iconSize / 2;
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    BPM_LEVELS.forEach((level, index) => {
-      const active = level.id === activeLevel.id;
-      const x = startX + index * (iconSize + gap);
-      const size = active ? iconSize + activeBoost : iconSize;
-      const imgSet = active ? "color" : "gray";
-      const img = refs.bpmImages[imgSet] && refs.bpmImages[imgSet][level.id];
-      ctx.fillStyle = active ? cfg.color : "rgba(255,255,255,.28)";
-      if (active) {
-        ctx.globalAlpha = 0.18 + pulse * 0.24;
-        ctx.beginPath();
-        ctx.arc(x, cy - 8, size * 0.72, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = active ? 1 : 0.78;
-      if (cfg.showIcon && img && img.complete) {
-        ctx.drawImage(img, x - size / 2, cy - 8 - size / 2, size, size);
-      } else {
-        ctx.beginPath();
-        ctx.arc(x, cy - 8, size * 0.28, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      if (cfg.showLabel) {
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = active ? "#fff" : "rgba(255,255,255,.5)";
-        ctx.font = active ? "800 18px Consolas, monospace" : "700 15px Consolas, monospace";
-        ctx.fillText(level.label, x, cy + 38);
-      }
-    });
-    ctx.globalAlpha = 1;
-    if (cfg.showNumber) {
-      ctx.fillStyle = "rgba(255,255,255,.78)";
-      ctx.font = "800 17px Consolas, monospace";
-      ctx.fillText(`${bpm} BPM`, cx, cy + (cfg.showLabel ? 62 : 42));
-    }
-    ctx.restore();
-  }
   function drawSub(s, fx) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -954,7 +969,7 @@
     const align = s.align || fx.align || "center";
     const effect = s.effect || fx.effect || "none";
     const fontFamily = s.fontFamily || SUBTITLE_FONTS[0].value;
-    const fontWeight = s.fontWeight || "800";
+    const fontWeight = s.fontWeight || "400";
     const fontStyle = s.fontStyle || "normal";
     const lines = wrapText(s.text || "New subtitle", CW * 0.82);
     const lh = size * 1.18;
@@ -1093,6 +1108,13 @@
   function loop() {
     const c = refs.clock;
     state.time = c.t0 + (performance.now() - c.perf0) / 1000;
+    if (state.exporting && refs.exportCancelRequested) {
+      if (refs.recorder && refs.recorder.state !== "inactive") {
+        try { refs.recorder.stop(); } catch (_) {}
+      }
+      pause();
+      return;
+    }
     if (state.time >= duration()) {
       state.time = duration();
       renderFrame(state.time);
@@ -1105,6 +1127,10 @@
     syncMedia(state.time);
     renderFrame(state.time);
     updateClock();
+    if (state.exporting) {
+      const progress = duration() ? state.time / duration() : 0;
+      updateExportModal("Exporting timeline in real time...", progress, Math.max(0, duration() - state.time));
+    }
     refs.raf = requestAnimationFrame(loop);
   }
 
@@ -1165,6 +1191,7 @@
     const url = URL.createObjectURL(file);
     el.video.src = url;
     await new Promise((resolve) => { el.video.onloadedmetadata = resolve; });
+    pushHistory("Import video");
     const targetTrackId = trackId || activeMediaTrackId("video");
     const sourceDuration = el.video.duration || 0;
     const start = resolveImportStart("video", targetTrackId, sourceDuration);
@@ -1207,6 +1234,7 @@
   async function loadAudio(file, detect, trackId, sourcePath) {
     setStatus("Decoding audio...");
     const buffer = await decodeAudio(file);
+    pushHistory("Import audio");
     refs.audioBlob = file;
     const peaks = buildPeaks(buffer, 2400);
     const url = URL.createObjectURL(file);
@@ -1262,7 +1290,6 @@
       state.bpm = clip.bpm;
       state.bpmOv.enabled = false;
       el.bpmInput.value = String(state.bpm);
-      generateBpmLogoOverlay({ silent: true, audioClip: clip });
       setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"} at ${fmtTC(clip.start, false)}. Detected about ${clip.bpm} BPM across ${Math.max(1, clip.bpmSections.length)} section(s).`);
     } else {
       setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"} at ${fmtTC(clip.start, false)}.`);
@@ -1270,6 +1297,7 @@
     refresh();
   }
   function addSubtitle() {
+    pushHistory("Add subtitle");
     const id = `s${Date.now()}`;
     const start = state.time;
     const end = start + 3;
@@ -1285,6 +1313,7 @@
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
+      pushHistory("Add logo");
       const id = `s${Date.now()}`;
       const start = state.time;
       state.subs.push(normalizeSubtitle({ id, type: "logo", text: file.name, start, end: start + 6, trackId: activeOverlayTrackId(), x: 0.5, y: 0.18, size: 0.22, color: "#fff", url, img, blob: file, sourcePath: sourcePath || "" }));
@@ -1442,28 +1471,6 @@
         ${slider("Opacity","viz.opacity",state.viz.opacity,.1,1,.01,"%")}
         ${swatches("viz.color", state.viz.color)}
       `;
-    } else if (selected === "bpm") {
-      const currentBpm = currentBpmAt(state.time);
-      const currentLevel = currentBpm ? bpmLevelFor(currentBpm) : null;
-      const currentSection = bpmSectionAt(state.time);
-      el.inspector.innerHTML = `
-        <div class="section"><h3>Track E BPM</h3></div>
-        ${numberRow("Tempo","bpm",state.bpm || "",40,240,.1)}
-        ${checkboxRow("Show icon", "bpmOv.showIcon", state.bpmOv.showIcon)}
-        ${checkboxRow("Show label", "bpmOv.showLabel", state.bpmOv.showLabel)}
-        ${checkboxRow("Show BPM number", "bpmOv.showNumber", state.bpmOv.showNumber)}
-        ${slider("Beat offset","bpmOv.offset",state.bpmOv.offset,-1,1,.01,"s")}
-        ${slider("Position X","bpmOv.x",state.bpmOv.x,0,1,.01,"%")}
-        ${slider("Position Y","bpmOv.y",state.bpmOv.y,0,1,.01,"%")}
-        <div class="stats">
-          <div><span>Current section</span><b>${currentSection ? `${fmtTC(currentSection.start, false)} - ${fmtTC(currentSection.end, false)}` : "-"}</b></div>
-          <div><span>Current BPM</span><b>${currentBpm ? `${currentBpm} ${currentLevel.label}` : "-"}</b></div>
-          <div><span>Detected sections</span><b>${state.bpmSections && state.bpmSections.length ? state.bpmSections.length : "-"}</b></div>
-          <div><span>Active preset</span><b>${currentLevel ? BPM_IMAGE_PRESETS.color[currentLevel.id] : "-"}</b></div>
-        </div>
-        <button class="wide-action" id="generateBpmLogoBtn">Create BPM Logo Track</button>
-        ${swatches("bpmOv.color", state.bpmOv.color)}
-      `;
     } else if (state.tracks.some((track) => track.id === selected && track.type === "overlay")) {
       const track = state.tracks.find((item) => item.id === selected);
       el.inspector.innerHTML = `
@@ -1505,6 +1512,15 @@
       `;
     } else {
       el.inspector.innerHTML = `
+        <div class="section"><h3>Native Export</h3></div>
+        ${numberRow("FPS", "nativeExport.fps", state.nativeExport.fps, 12, 60, 1)}
+        ${numberRow("CRF", "nativeExport.crf", state.nativeExport.crf, 12, 30, 1)}
+        <div class="row"><label>Preset</label><select data-bind="nativeExport.preset">${["medium","slow","fast","veryfast"].map((v) => `<option value="${v}" ${state.nativeExport.preset === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+        <div class="row"><label>Audio bitrate</label><select data-bind="nativeExport.audioBitrate">${["128k","192k","256k","320k"].map((v) => `<option value="${v}" ${state.nativeExport.audioBitrate === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+        <button class="wide-action" id="selectFfmpegBtn">Select FFmpeg</button>
+        <div class="stats">
+          <div><span>FFmpeg</span><b>${state.nativeExport.ffmpegVersion || state.nativeExport.ffmpegPath || "Not checked"}</b></div>
+        </div>
         <div class="stats">
           <div><span>Video clips</span><b>${state.videoClips.length || "-"}</b></div>
           <div><span>Audio clips</span><b>${state.audioClips.length || "-"}</b></div>
@@ -1547,6 +1563,49 @@
       btn.classList.toggle("is-on", btn.dataset.swatch === `${path}:${value}`);
     });
   }
+  function getPathValue(path) {
+    if (path.startsWith("sub.")) {
+      const s = state.subs.find((item) => item.id === state.selected);
+      return s ? s[path.slice(4)] : "";
+    }
+    if (path.startsWith("track.")) {
+      const track = state.tracks.find((item) => item.id === state.selected);
+      return track ? track[path.slice(6)] : "";
+    }
+    const parts = path.split(".");
+    if (parts.length === 1) return state[parts[0]];
+    return state[parts[0]] ? state[parts[0]][parts[1]] : "";
+  }
+  function openColorModal(path) {
+    if (!el.colorModal || !el.colorModalInput) return;
+    const current = getPathValue(path) || "#ffffff";
+    pushHistory("Change color");
+    state.pendingColorPath = path;
+    state.pendingColorOriginal = current;
+    el.colorModalInput.value = /^#[0-9a-f]{6}$/i.test(current) ? current : "#ffffff";
+    el.colorModal.hidden = false;
+  }
+  function closeColorModal(commit) {
+    if (!state.pendingColorPath) return;
+    if (!commit) {
+      setPath(state.pendingColorPath, state.pendingColorOriginal);
+      updateInspectorValue(state.pendingColorPath, state.pendingColorOriginal);
+      refresh({ inspector: false, projects: false });
+    }
+    state.pendingColorPath = "";
+    state.pendingColorOriginal = "";
+    if (el.colorModal) el.colorModal.hidden = true;
+  }
+  async function refreshFfmpegStatus() {
+    if (!window.pacekeeper || !window.pacekeeper.ffmpegStatus) return;
+    try {
+      const result = await window.pacekeeper.ffmpegStatus();
+      state.nativeExport.ffmpegPath = result.path || "";
+      state.nativeExport.ffmpegVersion = result.ok ? (result.version || result.path || "") : "";
+      if (!result.ok) setStatus("FFmpeg not found. Use Select FFmpeg before native export.");
+      refresh({ projects: false });
+    } catch (_) {}
+  }
   function setPath(path, value) {
     if (path === "bpm") {
       state.bpm = parseFloat(value) || 0;
@@ -1587,7 +1646,9 @@
       row.innerHTML = `<b style="background:${track.color}">${codeForTrack(index)}</b><span>${escapeHtml(track.label)}</span>${track.locked ? "" : `<button class="remove-track" data-remove-track="${track.id}" title="Remove track">x</button>`}`;
       labelRows.push(row.outerHTML);
     });
-    el.laneLabels.innerHTML = `<div class="ruler-gap"></div><div class="lane-labels-content">${labelRows.join("")}</div>`;
+    el.laneLabels.querySelector(".ruler-gap")?.remove();
+    el.laneLabels.querySelector(".lane-labels-content")?.remove();
+    el.laneLabels.insertAdjacentHTML("afterbegin", `<div class="ruler-gap"></div><div class="lane-labels-content">${labelRows.join("")}</div>`);
     syncLaneLabelScroll();
     el.ruler.innerHTML = "";
     const step = state.pxPerSec < 24 ? 10 : state.pxPerSec < 60 ? 5 : 1;
@@ -1602,7 +1663,7 @@
     Array.from(el.timelineInner.querySelectorAll(".lane")).forEach((lane) => lane.remove());
     state.tracks.forEach((track) => {
       const lane = document.createElement("div");
-      lane.className = `lane ${track.type === "overlay" ? "subs-lane" : ""} ${track.type === "bpm" ? "bpm-lane" : ""} ${trackIsSelected(track) ? "selected" : ""}${flashClass("track", track.id)}`;
+      lane.className = `lane ${track.type === "overlay" ? "subs-lane" : ""} ${trackIsSelected(track) ? "selected" : ""}${flashClass("track", track.id)}`;
       lane.dataset.track = track.id;
       el.timelineInner.appendChild(lane);
 
@@ -1650,8 +1711,6 @@
           }
           lane.appendChild(b);
         });
-      } else if (track.type === "bpm") {
-        renderBpmLane(lane);
       }
     });
   }
@@ -1753,49 +1812,93 @@
     }
     return sections.sort((a, b) => a.start - b.start);
   }
-  function renderBpmLane(lane) {
-    lane.innerHTML = "";
-    const sections = bpmTimelineSections();
-    sections.forEach((section) => {
-      if (!section.bpm || section.bpm <= 0) return;
-      const start = section.start;
-      const end = section.end;
-      const level = bpmLevelFor(section.bpm);
-      const sec = document.createElement("span");
-      sec.className = `bpm-section bpm-${level.id}`;
-      sec.style.left = `${start * state.pxPerSec}px`;
-      sec.style.width = `${Math.max(8, (end - start) * state.pxPerSec)}px`;
-      sec.textContent = `${level.label} ${section.bpm}`;
-      lane.appendChild(sec);
-      const beat = 60 / section.bpm;
-      for (let t = start + state.bpmOv.offset; t <= end; t += beat) {
-        if (t < 0) continue;
-        const line = document.createElement("span");
-        line.className = "beat-line";
-        line.style.left = `${t * state.pxPerSec}px`;
-        lane.appendChild(line);
-      }
-    });
-    if (sections.length) {
-      const tag = document.createElement("span");
-      tag.className = "bpm-tag";
-      tag.textContent = sections.length > 1 ? `${sections.length} BPM sections` : `${sections[0].bpm} BPM - ${(60 / sections[0].bpm).toFixed(2)}s/beat`;
-      lane.appendChild(tag);
-    }
-  }
   function renderProjects() {
     el.projectList.innerHTML = state.projects.length ? "" : `<div class="project-card"><span class="empty-thumb"></span><div><b>No saved projects</b><small>Use Save after editing.</small></div></div>`;
     state.projects.forEach((p) => {
       const card = document.createElement("div");
       card.className = `project-card ${p.id === state.id ? "active" : ""}`;
       card.dataset.project = p.id;
-      card.innerHTML = `${p.thumb ? `<img src="${p.thumb}" alt="">` : `<span class="empty-thumb"></span>`}<div><b>${escapeHtml(p.name)}</b><small>${new Date(p.updatedAt).toLocaleString()}</small></div>`;
+      card.innerHTML = `
+        <button class="project-delete" data-delete-project="${p.id}" title="Delete project">x</button>
+        ${p.thumb ? `<img src="${p.thumb}" alt="">` : `<span class="empty-thumb"></span>`}
+        <div><b>${escapeHtml(p.name)}</b><small>${new Date(p.updatedAt).toLocaleString()}</small></div>
+      `;
       el.projectList.appendChild(card);
     });
+    syncProjectListScroll();
+  }
+  function syncProjectListScroll() {
+    if (!el.projectList) return;
+    const maxScroll = Math.max(0, el.projectList.scrollHeight - el.projectList.clientHeight);
+    const scrollTop = clamp(el.projectList.scrollTop, 0, maxScroll);
+    const atTop = scrollTop <= 1;
+    const atBottom = maxScroll <= 1 || scrollTop >= maxScroll - 1;
+    if (el.projectHintTop) el.projectHintTop.hidden = atTop;
+    if (el.projectHintBottom) el.projectHintBottom.hidden = atBottom;
   }
   function syncLaneLabelScroll() {
     const content = el.laneLabels.querySelector(".lane-labels-content");
     if (content) content.style.transform = `translateY(${-el.timelineScroll.scrollTop}px)`;
+    const rulerHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ruler-h")) || 29;
+    const laneHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--lane-h")) || 44;
+    const visibleTrackHeight = Math.max(0, el.timelineScroll.clientHeight - rulerHeight);
+    const trackContentHeight = state.tracks.length * laneHeight;
+    const maxScroll = Math.max(0, trackContentHeight - visibleTrackHeight);
+    const scrollTop = clamp(el.timelineScroll.scrollTop, 0, maxScroll);
+    const atTop = scrollTop <= 1;
+    const atBottom = maxScroll <= 1 || scrollTop >= maxScroll - 1;
+    if (el.trackHintTop) el.trackHintTop.hidden = atTop;
+    if (el.trackHintBottom) el.trackHintBottom.hidden = atBottom;
+    updateTrackNavigator();
+  }
+  function updateTrackNavigator() {
+    if (!el.trackNavigator || !el.trackNavigatorThumb) return;
+    const maxScroll = el.timelineScroll.scrollHeight - el.timelineScroll.clientHeight;
+    if (maxScroll <= 1) {
+      el.trackNavigator.hidden = true;
+      return;
+    }
+    el.trackNavigator.hidden = false;
+    const navHeight = el.trackNavigator.clientHeight;
+    if (navHeight <= 0) return;
+    const thumbHeight = clamp((el.timelineScroll.clientHeight / el.timelineScroll.scrollHeight) * navHeight, 24, navHeight);
+    const maxThumbTop = Math.max(0, navHeight - thumbHeight);
+    const thumbTop = maxScroll > 0 ? (el.timelineScroll.scrollTop / maxScroll) * maxThumbTop : 0;
+    el.trackNavigatorThumb.style.height = `${thumbHeight}px`;
+    el.trackNavigatorThumb.style.transform = `translateY(${thumbTop}px)`;
+  }
+  function scrollTimelineFromNavigator(e, drag) {
+    const r = el.trackNavigator.getBoundingClientRect();
+    const navHeight = el.trackNavigator.clientHeight;
+    const thumbHeight = el.trackNavigatorThumb.offsetHeight || 24;
+    const maxScroll = el.timelineScroll.scrollHeight - el.timelineScroll.clientHeight;
+    const maxThumbTop = Math.max(1, navHeight - thumbHeight);
+    const offset = drag && Number.isFinite(drag.pointerOffset) ? drag.pointerOffset : thumbHeight / 2;
+    const thumbTop = clamp(e.clientY - r.top - offset, 0, maxThumbTop);
+    el.timelineScroll.scrollTop = (thumbTop / maxThumbTop) * maxScroll;
+  }
+  function startTrackNavigatorDrag(e) {
+    if (!el.trackNavigator || el.trackNavigator.hidden) return;
+    e.preventDefault();
+    const thumbRect = el.trackNavigatorThumb.getBoundingClientRect();
+    const pointerOffset = e.target === el.trackNavigatorThumb
+      ? clamp(e.clientY - thumbRect.top, 0, thumbRect.height)
+      : thumbRect.height / 2;
+    refs.trackNavigatorDrag = { pointerId: e.pointerId, pointerOffset };
+    el.trackNavigator.classList.add("dragging");
+    el.trackNavigator.setPointerCapture(e.pointerId);
+    scrollTimelineFromNavigator(e, refs.trackNavigatorDrag);
+  }
+  function moveTrackNavigatorDrag(e) {
+    if (!refs.trackNavigatorDrag || refs.trackNavigatorDrag.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    scrollTimelineFromNavigator(e, refs.trackNavigatorDrag);
+  }
+  function endTrackNavigatorDrag(e) {
+    if (!refs.trackNavigatorDrag || refs.trackNavigatorDrag.pointerId !== e.pointerId) return;
+    refs.trackNavigatorDrag = null;
+    el.trackNavigator.classList.remove("dragging");
+    if (el.trackNavigator.hasPointerCapture(e.pointerId)) el.trackNavigator.releasePointerCapture(e.pointerId);
   }
   function refresh(options) {
     options = options || {};
@@ -1805,10 +1908,10 @@
     applyAudioSettings();
     updateClock();
     el.vizBtn.classList.toggle("is-on", state.viz.enabled);
-    el.bpmBtn.classList.toggle("is-on", state.bpmOv.enabled);
     if (options.inspector !== false) renderInspector();
     renderTimeline();
     if (options.projects !== false) renderProjects();
+    else syncProjectListScroll();
     renderFrame(state.time);
   }
   function scheduleViewportRefresh() {
@@ -1843,23 +1946,112 @@
       .sort((a, b) => b.updatedAt - a.updatedAt);
     renderProjects();
   }
-  function projectRecord(includeBlobs) {
+  function showDeleteProjectModal(projectId) {
+    const project = state.projects.find((item) => item.id === projectId);
+    if (!project || !el.deleteProjectModal) return;
+    state.pendingDeleteProjectId = projectId;
+    if (el.deleteProjectText) el.deleteProjectText.textContent = `Delete "${project.name || "Untitled"}"?`;
+    el.deleteProjectModal.hidden = false;
+  }
+  function hideDeleteProjectModal() {
+    state.pendingDeleteProjectId = null;
+    if (el.deleteProjectModal) el.deleteProjectModal.hidden = true;
+  }
+  async function deletePendingProject() {
+    const projectId = state.pendingDeleteProjectId;
+    if (!projectId) return;
+    await idbTx("readwrite", (s) => s.delete(projectId));
+    if (state.id === projectId) {
+      state.id = null;
+      el.projectName.value = "Untitled";
+    }
+    hideDeleteProjectModal();
+    await refreshProjects();
+    setStatus("Deleted project.");
+  }
+  function hasProjectContent() {
+    return state.videoClips.length
+      || state.audioClips.length
+      || state.subs.length
+      || state.bpmSections.length
+      || (el.projectName.value || "Untitled") !== "Untitled";
+  }
+  function showSwitchProjectModal(projectId) {
+    const project = state.projects.find((item) => item.id === projectId);
+    if (!project || !el.switchProjectModal) return;
+    state.pendingSwitchProjectId = projectId;
+    if (el.switchProjectText) {
+      el.switchProjectText.textContent = `Save the current project before opening "${project.name || "Untitled"}"?`;
+    }
+    el.switchProjectModal.hidden = false;
+  }
+  function hideSwitchProjectModal() {
+    state.pendingSwitchProjectId = null;
+    if (el.switchProjectModal) el.switchProjectModal.hidden = true;
+  }
+  async function openProjectFromList(projectId) {
+    if (!projectId || projectId === state.id) return;
+    if (hasProjectContent() && isProjectDirty()) {
+      showSwitchProjectModal(projectId);
+      return;
+    }
+    await loadProject(projectId);
+  }
+  async function continueSwitchProject(saveCurrent) {
+    const projectId = state.pendingSwitchProjectId;
+    if (!projectId) return;
+    hideSwitchProjectModal();
+    if (saveCurrent) await saveProject();
+    await loadProject(projectId);
+  }
+  function currentSavedProject() {
+    return state.id ? state.projects.find((item) => item.id === state.id) : null;
+  }
+  function shouldConfirmProjectOverwrite() {
+    const project = currentSavedProject();
+    if (!project) return false;
+    return (project.name || "Untitled") === (el.projectName.value || "Untitled");
+  }
+  function showSaveProjectModal() {
+    const project = currentSavedProject();
+    if (!project || !el.saveProjectModal) return false;
+    if (el.saveProjectText) el.saveProjectText.textContent = `Overwrite "${project.name || "Untitled"}"?`;
+    el.saveProjectModal.hidden = false;
+    return true;
+  }
+  function hideSaveProjectModal() {
+    if (el.saveProjectModal) el.saveProjectModal.hidden = true;
+  }
+  async function requestSaveProject() {
+    if (shouldConfirmProjectOverwrite() && showSaveProjectModal()) return;
+    await saveProject();
+  }
+  async function confirmSaveProjectOverwrite() {
+    hideSaveProjectModal();
+    await saveProject({ forceNew: false });
+  }
+  function newProjectId() {
+    return `p${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  }
+  function projectRecord(includeBlobs, options) {
+    options = options || {};
     return {
       version: 1,
-      id: state.id || `p${Date.now()}`,
+      id: options.id || state.id || newProjectId(),
       name: el.projectName.value || "Untitled",
-      updatedAt: Date.now(),
-      thumb: thumbnail(),
+      updatedAt: options.updatedAt ?? Date.now(),
+      thumb: options.skipThumb ? "" : thumbnail(),
       trim: state.trim,
       videoOffset: state.videoOffset,
       audioOffset: state.audioOffset,
       videoTrackId: state.videoTrackId,
       audioTrackId: state.audioTrackId,
-      tracks: state.tracks,
+      tracks: normalizeTracks(state.tracks),
       viz: state.viz,
       bpm: state.bpm,
       bpmSections: state.bpmSections,
       bpmOv: state.bpmOv,
+      nativeExport: state.nativeExport,
       videoClips: state.videoClips.map((clip) => ({ id: clip.id, type: "video", trackId: clip.trackId, name: clip.name, sourcePath: clip.sourcePath || "", duration: clip.duration, start: clip.start, trimStart: clip.trimStart || 0, trimEnd: clip.trimEnd ?? clip.duration, volume: clip.volume, muted: clip.muted, thumbs: includeBlobs ? (clip.thumbs || []) : [], blob: includeBlobs ? (clip.blob || refs.videoBlobs[clip.id]) : null })),
       audioClips: state.audioClips.map((clip) => ({ id: clip.id, type: "audio", trackId: clip.trackId, name: clip.name, sourcePath: clip.sourcePath || "", duration: clip.duration, start: clip.start, trimStart: clip.trimStart || 0, trimEnd: clip.trimEnd ?? clip.duration, volume: clip.volume, muted: clip.muted, bpm: clip.bpm || 0, bpmSections: clip.bpmSections || [], peaks: includeBlobs ? clip.peaks : null, blob: includeBlobs ? (clip.blob || refs.audioBlobs[clip.id]) : null })),
       videoName: state.video && state.video.name,
@@ -1869,19 +2061,145 @@
       videoBlob: includeBlobs ? refs.videoBlob : null,
       audioBlob: includeBlobs ? refs.audioBlob : null,
       subtitleFx: state.subtitleFx,
-      subs: state.subs.map((s) => {
+      subs: state.subs.filter((s) => !(s.source && s.source.kind === "bpm-logo")).map((s) => {
         const sub = normalizeSubtitle(s);
         return { id: sub.id, type: sub.type, text: sub.text, sourcePath: sub.sourcePath || "", url: sub.url || "", source: sub.source || null, start: sub.start, end: sub.end, trackId: sub.trackId, x: sub.x, y: sub.y, size: sub.size, color: sub.color, fontFamily: sub.fontFamily, fontWeight: sub.fontWeight, fontStyle: sub.fontStyle, effect: sub.effect, align: sub.align, background: sub.background };
       }),
       logoBlobs: includeBlobs ? Object.fromEntries(state.subs.filter((s) => s.type === "logo" && s.blob).map((s) => [s.id, s.blob])) : {}
     };
   }
-  async function saveProject() {
-    const rec = projectRecord(true);
+  function projectSnapshot() {
+    const rec = projectRecord(false, { id: "snapshot", updatedAt: 0, skipThumb: true });
+    return JSON.stringify(rec);
+  }
+  function makeHistorySnapshot() {
+    return {
+      rec: projectRecord(true, { id: state.id || "__new_project__", updatedAt: 0, skipThumb: true }),
+      hadProjectId: !!state.id,
+      selected: state.selected,
+      selectedClipId: state.selectedClipId,
+      time: state.time,
+      pxPerSec: state.pxPerSec,
+      bpmInput: el.bpmInput.value || ""
+    };
+  }
+  function clearHistory() {
+    refs.historyPast = [];
+    refs.historyFuture = [];
+    updateHistoryButtons();
+  }
+  function updateHistoryButtons() {
+    if (el.undo) el.undo.disabled = !refs.historyPast.length;
+    if (el.redo) el.redo.disabled = !refs.historyFuture.length;
+  }
+  function pushHistory(label) {
+    if (refs.historyRestoring || state.exporting) return;
+    refs.historyPast.push(makeHistorySnapshot());
+    if (refs.historyPast.length > HISTORY_LIMIT) refs.historyPast.shift();
+    refs.historyFuture = [];
+    updateHistoryButtons();
+  }
+  async function restoreHistorySnapshot(snapshot) {
+    if (!snapshot || !snapshot.rec) return;
+    stop();
+    refs.historyRestoring = true;
+    refs.videoBlobs = {};
+    refs.audioBlobs = {};
+    refs.activeVideoClipId = null;
+    refs.activeAudioClipId = null;
+    const rec = snapshot.rec;
+    const migrated = migrateLegacyClips(rec);
+    Object.assign(state, {
+      id: snapshot.hadProjectId ? rec.id : null,
+      tracks: normalizeTracks(rec.tracks),
+      videoTrackId: rec.videoTrackId || firstTrackIdOfType("video"),
+      audioTrackId: rec.audioTrackId || firstTrackIdOfType("audio"),
+      videoAudio: rec.videoAudio || { muted: true, volume: 0.8 },
+      musicAudio: rec.musicAudio || { muted: false, volume: 1 },
+      viz: rec.viz || state.viz,
+      bpm: rec.bpm || 0,
+      bpmSections: rec.bpmSections || [],
+      bpmOv: { ...state.bpmOv, ...(rec.bpmOv || {}) },
+      nativeExport: { ...state.nativeExport, ...(rec.nativeExport || {}) },
+      subtitleFx: rec.subtitleFx || state.subtitleFx,
+      trim: rec.trim || { start: 0, end: 0 },
+      videoOffset: rec.videoOffset ?? 0,
+      audioOffset: rec.audioOffset ?? 0,
+      selected: snapshot.selected || null,
+      selectedClipId: snapshot.selectedClipId || null,
+      time: snapshot.time || 0,
+      pxPerSec: snapshot.pxPerSec || state.pxPerSec,
+      video: null,
+      audio: null,
+      videoClips: migrated.videoClips,
+      audioClips: migrated.audioClips,
+      subs: []
+    });
+    el.projectName.value = rec.name || "Untitled";
+    el.bpmInput.value = snapshot.bpmInput || (state.bpm ? String(state.bpm) : "");
+    syncLegacyMediaState();
+    if (state.video) attachVideoClip(state.video);
+    else {
+      el.video.pause();
+      el.video.removeAttribute("src");
+    }
+    if (state.audio) attachAudioClip(state.audio);
+    else {
+      el.audio.pause();
+      el.audio.removeAttribute("src");
+      el.audio.load();
+    }
+    state.subs = (rec.subs || []).filter((s) => !(s.source && s.source.kind === "bpm-logo")).map((s) => {
+      const out = normalizeSubtitle(s);
+      if (out.type === "logo" && rec.logoBlobs && rec.logoBlobs[out.id]) {
+        out.blob = rec.logoBlobs[out.id];
+        out.url = URL.createObjectURL(out.blob);
+        out.img = new Image();
+        out.img.src = out.url;
+      } else if (out.type === "logo" && out.url) {
+        out.img = new Image();
+        out.img.src = out.url;
+      }
+      return out;
+    });
+    syncLegacyMediaState();
+    syncMedia(state.time);
+    refs.historyRestoring = false;
+    refresh();
+  }
+  async function undo() {
+    if (!refs.historyPast.length) return;
+    const current = makeHistorySnapshot();
+    const previous = refs.historyPast.pop();
+    refs.historyFuture.push(current);
+    if (refs.historyFuture.length > HISTORY_LIMIT) refs.historyFuture.shift();
+    await restoreHistorySnapshot(previous);
+    updateHistoryButtons();
+    setStatus("Undo.");
+  }
+  async function redo() {
+    if (!refs.historyFuture.length) return;
+    const current = makeHistorySnapshot();
+    const next = refs.historyFuture.pop();
+    refs.historyPast.push(current);
+    if (refs.historyPast.length > HISTORY_LIMIT) refs.historyPast.shift();
+    await restoreHistorySnapshot(next);
+    updateHistoryButtons();
+    setStatus("Redo.");
+  }
+  function rememberProjectClean() {
+    state.cleanProjectSnapshot = projectSnapshot();
+  }
+  function isProjectDirty() {
+    return projectSnapshot() !== state.cleanProjectSnapshot;
+  }
+  async function saveProject(options) {
+    options = options || {};
+    const rec = projectRecord(true, { id: options.forceNew === false && state.id ? state.id : newProjectId() });
     state.id = rec.id;
     await idbTx("readwrite", (s) => s.put(rec));
     if (window.pacekeeper && window.pacekeeper.saveProjectFile) {
-      const fileRec = projectRecord(false);
+      const fileRec = projectRecord(false, { id: rec.id });
       fileRec.media = {
         video: state.videoClips.map((clip) => ({ name: clip.name, path: clip.sourcePath || "", trackId: clip.trackId, start: clip.start })),
         audio: state.audioClips.map((clip) => ({ name: clip.name, path: clip.sourcePath || "", trackId: clip.trackId, start: clip.start }))
@@ -1889,6 +2207,7 @@
       try { await window.pacekeeper.saveProjectFile(fileRec); } catch (_) {}
     }
     await refreshProjects();
+    rememberProjectClean();
     setStatus(`Saved project "${rec.name}".`);
   }
   function reviveVideoClip(rec) {
@@ -1919,7 +2238,7 @@
     const migrated = migrateLegacyClips(rec);
     Object.assign(state, {
       id: rec.id,
-      tracks: rec.tracks || defaultTracks(),
+      tracks: normalizeTracks(rec.tracks),
       videoTrackId: rec.videoTrackId || "video",
       audioTrackId: rec.audioTrackId || "audio",
       videoAudio: rec.videoAudio || state.videoAudio,
@@ -1928,6 +2247,7 @@
       bpm: rec.bpm || 0,
       bpmSections: rec.bpmSections || [],
       bpmOv: { ...state.bpmOv, ...(rec.bpmOv || {}) },
+      nativeExport: { ...state.nativeExport, ...(rec.nativeExport || {}) },
       subtitleFx: rec.subtitleFx || state.subtitleFx,
       trim: rec.trim || { start: 0, end: 0 },
       videoOffset: rec.videoOffset ?? 0,
@@ -1961,7 +2281,7 @@
     syncLegacyMediaState();
     if (state.video) attachVideoClip(state.video);
     if (state.audio) attachAudioClip(state.audio);
-    state.subs = (rec.subs || []).map((s) => {
+    state.subs = (rec.subs || []).filter((s) => !(s.source && s.source.kind === "bpm-logo")).map((s) => {
       const out = normalizeSubtitle(s);
       if (out.type === "logo" && rec.logoBlobs && rec.logoBlobs[out.id]) {
         out.blob = rec.logoBlobs[out.id];
@@ -1976,6 +2296,8 @@
     });
     setStatus(`Loaded project "${rec.name}".`);
     refresh();
+    rememberProjectClean();
+    clearHistory();
   }
   async function loadProjectJsonFile(file) {
     const rec = JSON.parse(await file.text());
@@ -1984,7 +2306,7 @@
     state.trim = rec.trim || { start: 0, end: 0 };
     state.videoOffset = rec.videoOffset ?? 0;
     state.audioOffset = rec.audioOffset ?? 0;
-    state.tracks = rec.tracks || defaultTracks();
+    state.tracks = normalizeTracks(rec.tracks);
     state.videoTrackId = rec.videoTrackId || firstTrackIdOfType("video");
     state.audioTrackId = rec.audioTrackId || firstTrackIdOfType("audio");
     refs.videoBlobs = {};
@@ -1997,8 +2319,9 @@
     state.bpm = rec.bpm || 0;
     state.bpmSections = rec.bpmSections || [];
     state.bpmOv = { ...state.bpmOv, ...(rec.bpmOv || {}) };
+    state.nativeExport = { ...state.nativeExport, ...(rec.nativeExport || {}) };
     state.subtitleFx = rec.subtitleFx || state.subtitleFx;
-    state.subs = (rec.subs || []).map((sub) => {
+    state.subs = (rec.subs || []).filter((sub) => !(sub.source && sub.source.kind === "bpm-logo")).map((sub) => {
       const out = normalizeSubtitle({ ...sub, trackId: sub.trackId || activeOverlayTrackId() });
       if (out.type === "logo" && out.url) {
         out.img = new Image();
@@ -2012,12 +2335,15 @@
     el.bpmInput.value = state.bpm ? String(state.bpm) : "";
     setStatus("Loaded project settings. Re-import media files if this JSON was moved.");
     refresh();
+    rememberProjectClean();
+    clearHistory();
   }
 
   function startTrimDrag(clipId, which, ev) {
     ev.stopPropagation();
     const clip = state.videoClips.find((item) => item.id === clipId);
     if (!clip) return;
+    pushHistory("Trim clip");
     selectMediaClip(clip);
     const sourceStart = clip.trimStart || 0;
     const sourceEnd = clip.trimEnd ?? clip.duration;
@@ -2046,6 +2372,7 @@
   }
   function startSubDrag(s, ev) {
     ev.stopPropagation();
+    pushHistory("Move subtitle");
     state.selected = s.id;
     clearSelectedMediaClip();
     if (!state.playing && (state.time < s.start || state.time > s.end)) seekIntoSubtitle(s);
@@ -2070,6 +2397,7 @@
   }
   function startSubResize(s, edge, ev) {
     ev.stopPropagation();
+    pushHistory("Resize subtitle");
     state.selected = s.id;
     clearSelectedMediaClip();
     const x0 = ev.clientX;
@@ -2094,6 +2422,7 @@
     ev.stopPropagation();
     const clip = findMediaClip(clipId);
     if (!clip) return;
+    pushHistory("Move clip");
     selectMediaClip(clip);
     const x0 = ev.clientX;
     const start = clip.start || 0;
@@ -2153,6 +2482,7 @@
     const point = canvasPointFromEvent(ev);
     const sub = overlayItemAtPoint(point);
     if (!sub) return false;
+    pushHistory("Move overlay");
     ev.preventDefault();
     ev.stopPropagation();
     state.selected = sub.id;
@@ -2212,6 +2542,7 @@
       for (let i = 1; i < refs.tap.length; i++) sum += refs.tap[i] - refs.tap[i - 1];
       const bpm = Math.round(60000 / (sum / (refs.tap.length - 1)));
       if (bpm >= 40 && bpm <= 240) {
+        pushHistory("Tap BPM");
         state.bpm = bpm;
         state.bpmSections = [];
         el.bpmInput.value = String(bpm);
@@ -2219,8 +2550,181 @@
       }
     }
   }
+  function fmtRemaining(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "--:--";
+    const total = Math.ceil(seconds);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  function estimatedRemaining(progress, fallback) {
+    const clamped = clamp(progress || 0, 0, 1);
+    if (clamped >= 1) return 0;
+    if (clamped > 0.02 && refs.exportStartedAt) {
+      const elapsed = (performance.now() - refs.exportStartedAt) / 1000;
+      return Math.max(0, elapsed / clamped - elapsed);
+    }
+    return fallback;
+  }
+  function showExportModal(title) {
+    refs.exportCancelRequested = false;
+    refs.exportCompleted = false;
+    refs.exportStartedAt = performance.now();
+    if (!el.exportModal) return;
+    if (el.exportModalTitle) el.exportModalTitle.textContent = title || "Export";
+    if (el.exportModalText) el.exportModalText.textContent = "Preparing export...";
+    if (el.exportProgressBar) el.exportProgressBar.style.width = "0%";
+    if (el.exportRemaining) el.exportRemaining.textContent = "--:--";
+    if (el.exportCancel) el.exportCancel.hidden = false;
+    if (el.exportClose) el.exportClose.hidden = true;
+    el.exportModal.hidden = false;
+  }
+  function updateExportModal(text, progress, remaining) {
+    if (!el.exportModal || el.exportModal.hidden) return;
+    const clamped = clamp(progress || 0, 0, 1);
+    if (el.exportModalText) el.exportModalText.textContent = text || "Exporting...";
+    if (el.exportProgressBar) el.exportProgressBar.style.width = `${Math.round(clamped * 100)}%`;
+    if (el.exportRemaining) el.exportRemaining.textContent = fmtRemaining(remaining);
+  }
+  function completeExportModal(text) {
+    refs.exportCompleted = true;
+    updateExportModal(text || "Export complete.", 1, 0);
+    if (el.exportCancel) el.exportCancel.hidden = true;
+    if (el.exportClose) el.exportClose.hidden = false;
+  }
+  function closeExportModal() {
+    if (el.exportModal) el.exportModal.hidden = true;
+  }
+  function cancelExport() {
+    if (refs.exportCompleted) {
+      closeExportModal();
+      return;
+    }
+    refs.exportCancelRequested = true;
+    updateExportModal("Canceling export...", 0, 0);
+    if (window.pacekeeper && window.pacekeeper.cancelNativeExport) {
+      window.pacekeeper.cancelNativeExport().catch(() => {});
+    }
+    if (refs.recorder && refs.recorder.state !== "inactive") refs.recorder.stop();
+  }
+  function canUseNativeExport() {
+    return !!(window.pacekeeper && window.pacekeeper.beginNativeExport && window.pacekeeper.writeNativeExportFrame && window.pacekeeper.finishNativeExport);
+  }
+  async function selectFfmpeg() {
+    if (!window.pacekeeper || !window.pacekeeper.selectFfmpeg) {
+      setStatus("FFmpeg selection is available in the Electron app.");
+      return;
+    }
+    try {
+      const result = await window.pacekeeper.selectFfmpeg();
+      if (result.canceled) return;
+      state.nativeExport.ffmpegPath = result.path || "";
+      state.nativeExport.ffmpegVersion = result.version || result.path || "";
+      setStatus(`FFmpeg ready: ${state.nativeExport.ffmpegVersion}`);
+      refresh();
+    } catch (error) {
+      setStatus(`FFmpeg check failed: ${error.message || error}`);
+    }
+  }
+  function firstAudioForNativeExport() {
+    return state.audioClips.find((clip) => clip.sourcePath) || null;
+  }
+  function waitForMediaSeek(media, target, timeout) {
+    if (!media || !media.src) return Promise.resolve();
+    if (media.readyState >= 2 && !media.seeking && Math.abs((media.currentTime || 0) - target) < 0.08) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(done, timeout || 900);
+      function done() {
+        clearTimeout(timer);
+        media.removeEventListener("seeked", done);
+        media.removeEventListener("loadeddata", done);
+        resolve();
+      }
+      media.addEventListener("seeked", done, { once: true });
+      media.addEventListener("loadeddata", done, { once: true });
+    });
+  }
+  function stagePngBytes() {
+    return new Promise((resolve, reject) => {
+      el.stage.toBlob(async (blob) => {
+        if (!blob) { reject(new Error("Could not encode preview frame.")); return; }
+        resolve(await blob.arrayBuffer());
+      }, "image/png");
+    });
+  }
+  async function exportNativeVideo() {
+    if (!canUseNativeExport()) return false;
+    if (duration() <= 0) { setStatus("Import media before exporting."); return true; }
+    const fps = clamp(Number(state.nativeExport.fps) || 30, 12, 60);
+    const totalFrames = Math.max(1, Math.ceil(duration() * fps));
+    const audioClip = firstAudioForNativeExport();
+    let removeProgressListener = null;
+    try {
+      showExportModal("Export MP4");
+      if (window.pacekeeper.onExportProgress) {
+        removeProgressListener = window.pacekeeper.onExportProgress((data) => {
+          if (data && data.time) {
+            setStatus(`Encoding MP4 with FFmpeg... ${data.time}`);
+            updateExportModal(`Encoding MP4 with FFmpeg... ${data.time}`, 0.96, "--:--");
+          }
+        });
+      }
+      const session = await window.pacekeeper.beginNativeExport({
+        name: el.projectName.value || "PaceKeeper",
+        fps,
+        duration: duration()
+      });
+      if (session.canceled) return true;
+      pause();
+      state.exporting = true;
+      el.export.textContent = "Exporting";
+      for (let i = 0; i < totalFrames; i++) {
+        if (refs.exportCancelRequested) throw new Error("Export canceled.");
+        const t = Math.min(duration(), i / fps);
+        state.time = t;
+        syncMedia(t);
+        const videoClip = activeClipAt("video", t);
+        if (videoClip) await waitForMediaSeek(el.video, (videoClip.trimStart || 0) + clamp(clipLocalTime(videoClip, t), 0, clipDuration(videoClip)), 900);
+        renderFrame(t);
+        await window.pacekeeper.writeNativeExportFrame(session, i, await stagePngBytes());
+        if (i % Math.max(1, Math.round(fps)) === 0 || i === totalFrames - 1) {
+          const progress = (i + 1) / totalFrames * 0.92;
+          const remaining = estimatedRemaining(progress, Math.max(0, duration() - t));
+          setStatus(`Rendering frames for FFmpeg... ${i + 1}/${totalFrames}`);
+          updateExportModal(`Rendering frames... ${i + 1}/${totalFrames}`, progress, remaining);
+          updateClock();
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      if (refs.exportCancelRequested) throw new Error("Export canceled.");
+      updateExportModal("Encoding MP4 with FFmpeg...", 0.96, "--:--");
+      const result = await window.pacekeeper.finishNativeExport(session, {
+        fps,
+        crf: clamp(Number(state.nativeExport.crf) || 18, 12, 30),
+        preset: state.nativeExport.preset || "medium",
+        audioBitrate: state.nativeExport.audioBitrate || "192k",
+        audioPath: audioClip ? audioClip.sourcePath : "",
+        audioStart: audioClip ? audioClip.start || 0 : 0
+      });
+      setStatus(`Native MP4 export complete: ${result.outputPath}`);
+      completeExportModal(`Export complete: ${result.outputPath}`);
+      return true;
+    } catch (error) {
+      const canceled = /canceled/i.test(error.message || String(error));
+      setStatus(canceled ? "Export canceled." : `Native export failed: ${error.message || error}`);
+      completeExportModal(canceled ? "Export canceled." : `Native export failed: ${error.message || error}`);
+      return true;
+    } finally {
+      if (removeProgressListener) removeProgressListener();
+      state.exporting = false;
+      el.export.textContent = "Export";
+      renderFrame(state.time);
+      refresh();
+    }
+  }
   async function exportVideo() {
     if (state.exporting) return;
+    if (await exportNativeVideo()) return;
     if (duration() <= 0) { setStatus("Import media before exporting."); return; }
     if (!el.stage.captureStream || typeof MediaRecorder === "undefined") {
       setStatus("This browser cannot export from canvas. Try Electron/Chrome.");
@@ -2240,17 +2744,23 @@
     refs.recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 });
     refs.recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     refs.recorder.onstop = () => {
+      const canceled = refs.exportCancelRequested;
       const blob = new Blob(chunks, { type: "video/webm" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${el.projectName.value || "PaceKeeper"}.webm`;
-      a.click();
+      if (!canceled) {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `${el.projectName.value || "PaceKeeper"}.webm`;
+        a.click();
+      }
       state.exporting = false;
       el.export.textContent = "Export";
-      setStatus("Preview export complete. Native MP4 export is wired for the desktop FFmpeg phase.");
+      setStatus(canceled ? "Export canceled." : "Preview export complete. Native MP4 export is wired for the desktop FFmpeg phase.");
+      completeExportModal(canceled ? "Export canceled." : "Export complete. File download started.");
       refresh();
     };
     state.exporting = true;
+    showExportModal("Export WebM");
+    updateExportModal("Exporting timeline in real time...", 0, duration());
     setStatus("Exporting timeline in real time...");
     seek(0);
     setTimeout(() => { refs.recorder.start(100); play(); }, 150);
@@ -2280,6 +2790,7 @@
       if (e.target === el.trackModal) hideTrackModal();
       const type = e.target.closest("[data-add-track-type]") && e.target.closest("[data-add-track-type]").dataset.addTrackType;
       if (!type) return;
+      pushHistory("Add track");
       const id = addTrack(type);
       if (id) {
         state.selected = id;
@@ -2296,8 +2807,10 @@
       refs.videoBlob = null; refs.audioBlob = null; refs.videoBlobs = {}; refs.audioBlobs = {}; refs.activeVideoClipId = null; refs.activeAudioClipId = null; el.video.removeAttribute("src"); el.audio.removeAttribute("src"); el.projectName.value = "Untitled";
       setStatus("New project.");
       refresh();
+      rememberProjectClean();
+      clearHistory();
     };
-    $("saveProjectBtn").onclick = saveProject;
+    $("saveProjectBtn").onclick = () => requestSaveProject().catch((error) => setStatus(`Save failed: ${error.message || error}`));
     $("loadFileBtn").onclick = async () => {
       if (window.pacekeeper && window.pacekeeper.loadProjectFile) {
         const res = await window.pacekeeper.loadProjectFile();
@@ -2334,10 +2847,20 @@
     $("stopBtn").onclick = stop;
     el.play.onclick = () => state.playing ? pause() : play();
     el.export.onclick = exportVideo;
+    el.undo.onclick = () => undo().catch((error) => setStatus(`Undo failed: ${error.message || error}`));
+    el.redo.onclick = () => redo().catch((error) => setStatus(`Redo failed: ${error.message || error}`));
     el.vizBtn.onclick = () => { state.viz.enabled = !state.viz.enabled; state.selected = "viz"; clearSelectedMediaClip(); markFlash("track", "viz"); refresh(); };
-    el.bpmBtn.onclick = () => { state.bpmOv.enabled = !state.bpmOv.enabled; state.selected = "bpm"; clearSelectedMediaClip(); markFlash("track", "bpm"); refresh(); };
     $("tapBtn").onclick = tapBpm;
-    el.bpmInput.oninput = (e) => { state.bpm = parseFloat(e.target.value) || 0; state.bpmSections = []; refresh(); };
+    el.bpmInput.oninput = (e) => {
+      if (!e.target.dataset.historyActive) {
+        pushHistory("Edit BPM");
+        e.target.dataset.historyActive = "1";
+      }
+      state.bpm = parseFloat(e.target.value) || 0;
+      state.bpmSections = [];
+      refresh();
+    };
+    el.bpmInput.addEventListener("blur", () => { delete el.bpmInput.dataset.historyActive; });
     $("zoomOutBtn").onclick = () => zoom(1 / 1.4);
     $("zoomInBtn").onclick = () => zoom(1.4);
     $("fitBtn").onclick = fitZoom;
@@ -2349,13 +2872,34 @@
       if (e.ctrlKey || e.altKey || e.metaKey) {
         e.preventDefault();
         zoom(e.deltaY < 0 ? 1.16 : 1 / 1.16);
-      } else if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        el.timelineScroll.scrollLeft += e.deltaY;
+      } else if (e.shiftKey) {
+        e.preventDefault();
+        el.timelineScroll.scrollLeft += e.deltaY || e.deltaX;
+      } else {
+        e.preventDefault();
+        el.timelineScroll.scrollTop += e.deltaY;
       }
     }, { passive: false });
     el.timelineScroll.addEventListener("scroll", () => {
       syncLaneLabelScroll();
     });
+    el.laneLabels.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      el.timelineScroll.scrollTop += e.deltaY;
+    }, { passive: false });
+    if (el.trackNavigator) {
+      el.trackNavigator.addEventListener("pointerdown", startTrackNavigatorDrag);
+      el.trackNavigator.addEventListener("pointermove", moveTrackNavigatorDrag);
+      el.trackNavigator.addEventListener("pointerup", endTrackNavigatorDrag);
+      el.trackNavigator.addEventListener("pointercancel", endTrackNavigatorDrag);
+    }
+    if (el.projectList) {
+      el.projectList.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        el.projectList.scrollTop += e.deltaY;
+      }, { passive: false });
+      el.projectList.addEventListener("scroll", syncProjectListScroll);
+    }
     document.addEventListener("pointerdown", (e) => {
       const deleteMediaClip = e.target.closest("[data-delete-media-clip]");
       if (deleteMediaClip) {
@@ -2411,8 +2955,7 @@
       const row = e.target.closest("[data-track]");
       if (!row) return;
       const track = state.tracks.find((item) => item.id === row.dataset.track);
-      if (track && track.type === "bpm") state.selected = "bpm";
-      else if (track && track.type === "viz") state.selected = "viz";
+      if (track && track.type === "viz") state.selected = "viz";
       else if (track && track.type === "overlay") state.selected = track.id;
       else if (track) state.selected = track.id;
       clearSelectedMediaClip();
@@ -2421,6 +2964,10 @@
     el.inspector.addEventListener("input", (e) => {
       const path = e.target.dataset.bind;
       if (!path) return;
+      if (!e.target.dataset.historyActive) {
+        pushHistory("Edit inspector");
+        e.target.dataset.historyActive = "1";
+      }
       const isText = e.target.tagName === "TEXTAREA";
       const isCheck = e.target.type === "checkbox";
       const isString = isText || e.target.tagName === "SELECT" || path.endsWith(".text") || path.endsWith(".color") || path.endsWith(".trackId") || path.endsWith(".effect") || path.endsWith(".align");
@@ -2428,17 +2975,27 @@
       updateInspectorValue(path, isCheck ? e.target.checked : isString ? e.target.value : parseFloat(e.target.value) || 0);
       refresh({ inspector: false, projects: false });
     });
+    el.inspector.addEventListener("focusin", (e) => {
+      if (!e.target.dataset.bind) return;
+      if (e.target.dataset.historyActive) return;
+      pushHistory("Edit inspector");
+      e.target.dataset.historyActive = "1";
+    });
+    el.inspector.addEventListener("focusout", (e) => {
+      if (e.target.dataset.historyActive) delete e.target.dataset.historyActive;
+    });
     el.inspector.addEventListener("click", (e) => {
       const style = e.target.dataset.vizStyle;
-      if (style) { state.viz.style = style; refresh(); }
+      if (style) { pushHistory("Change visualizer style"); state.viz.style = style; refresh(); }
       const subEffect = e.target.dataset.subEffect;
-      if (subEffect) { state.subtitleFx.effect = subEffect; refresh(); }
+      if (subEffect) { pushHistory("Change subtitle effect"); state.subtitleFx.effect = subEffect; refresh(); }
       const subStyleButton = e.target.closest("[data-sub-style]");
       const subStyle = subStyleButton ? subStyleButton.dataset.subStyle : "";
       if (subStyle) {
         const [key, value] = subStyle.split(":");
         const sub = state.subs.find((s) => s.id === state.selected);
         if (sub) {
+          pushHistory("Change subtitle style");
           if (key === "fontStyle") sub.fontStyle = sub.fontStyle === value ? "normal" : value;
           else sub[key] = value;
           Object.assign(sub, normalizeSubtitle(sub));
@@ -2447,6 +3004,7 @@
       }
       const swatch = e.target.dataset.swatch;
       if (swatch) {
+        pushHistory("Change color");
         const idx = swatch.indexOf(":");
         setPath(swatch.slice(0, idx), swatch.slice(idx + 1));
         updateInspectorValue(swatch.slice(0, idx), swatch.slice(idx + 1));
@@ -2454,10 +3012,10 @@
       }
       const colorPick = e.target.dataset.colorPick;
       if (colorPick) {
-        const input = el.inspector.querySelector(`input[data-color-input="${colorPick}"]`);
-        if (input) input.click();
+        openColorModal(colorPick);
       }
       if (e.target.id === "deleteSubBtn") {
+        pushHistory("Delete subtitle");
         const deleted = state.subs.find((s) => s.id === state.selected);
         state.subs = state.subs.filter((s) => s.id !== state.selected);
         state.selected = null;
@@ -2465,8 +3023,8 @@
         if (deleted) markFlash("track", deleted.trackId || "overlay-1");
         refresh();
       }
-      if (e.target.id === "generateBpmLogoBtn") {
-        generateBpmLogoOverlay();
+      if (e.target.id === "selectFfmpegBtn") {
+        selectFfmpeg();
       }
       if (e.target.id === "deleteTrackBtn") {
         if (removeTrackById(state.selected)) refresh();
@@ -2479,11 +3037,69 @@
       updateInspectorValue(path, e.target.value);
       refresh({ inspector: false, projects: false });
     });
+    if (el.colorModalInput) {
+      el.colorModalInput.addEventListener("input", () => {
+        if (!state.pendingColorPath) return;
+        setPath(state.pendingColorPath, el.colorModalInput.value);
+        updateInspectorValue(state.pendingColorPath, el.colorModalInput.value);
+        refresh({ inspector: false, projects: false });
+      });
+    }
     el.projectList.onclick = (e) => {
+      const deleteButton = e.target.closest("[data-delete-project]");
+      if (deleteButton) {
+        e.preventDefault();
+        e.stopPropagation();
+        showDeleteProjectModal(deleteButton.dataset.deleteProject);
+        return;
+      }
       const card = e.target.closest("[data-project]");
-      if (card) loadProject(card.dataset.project);
+      if (card) openProjectFromList(card.dataset.project).catch((error) => setStatus(`Open failed: ${error.message || error}`));
     };
+    if (el.deleteProjectModal) {
+      el.deleteProjectModal.addEventListener("click", (e) => {
+        if (e.target === el.deleteProjectModal || e.target === el.deleteProjectNo || e.target === el.deleteProjectCancelTop) hideDeleteProjectModal();
+      });
+    }
+    if (el.deleteProjectYes) el.deleteProjectYes.onclick = () => { deletePendingProject().catch((error) => setStatus(`Delete failed: ${error.message || error}`)); };
+    if (el.switchProjectModal) {
+      el.switchProjectModal.addEventListener("click", (e) => {
+        if (e.target === el.switchProjectModal || e.target === el.switchProjectCancel || e.target === el.switchProjectCancelTop) hideSwitchProjectModal();
+      });
+    }
+    if (el.switchProjectYes) el.switchProjectYes.onclick = () => { continueSwitchProject(true).catch((error) => setStatus(`Open failed: ${error.message || error}`)); };
+    if (el.switchProjectNo) el.switchProjectNo.onclick = () => { continueSwitchProject(false).catch((error) => setStatus(`Open failed: ${error.message || error}`)); };
+    if (el.saveProjectModal) {
+      el.saveProjectModal.addEventListener("click", (e) => {
+        if (e.target === el.saveProjectModal || e.target === el.saveProjectNo || e.target === el.saveProjectCancelTop) hideSaveProjectModal();
+      });
+    }
+    if (el.saveProjectYes) el.saveProjectYes.onclick = () => { confirmSaveProjectOverwrite().catch((error) => setStatus(`Save failed: ${error.message || error}`)); };
+    if (el.exportCancel) el.exportCancel.onclick = cancelExport;
+    if (el.exportClose) el.exportClose.onclick = closeExportModal;
+    if (el.colorModal) {
+      el.colorModal.addEventListener("click", (e) => {
+        if (e.target === el.colorModal || e.target === el.colorModalCancel || e.target === el.colorModalClose) closeColorModal(false);
+      });
+    }
+    if (el.colorModalOk) el.colorModalOk.onclick = () => closeColorModal(true);
     document.addEventListener("keydown", (e) => {
+      if (e.code === "Escape" && el.deleteProjectModal && !el.deleteProjectModal.hidden) { hideDeleteProjectModal(); return; }
+      if (e.code === "Escape" && el.switchProjectModal && !el.switchProjectModal.hidden) { hideSwitchProjectModal(); return; }
+      if (e.code === "Escape" && el.saveProjectModal && !el.saveProjectModal.hidden) { hideSaveProjectModal(); return; }
+      if (e.code === "Escape" && el.exportModal && !el.exportModal.hidden && refs.exportCompleted) { closeExportModal(); return; }
+      if (e.code === "Escape" && el.colorModal && !el.colorModal.hidden) { closeColorModal(false); return; }
+      if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") {
+        e.preventDefault();
+        const action = e.shiftKey ? redo : undo;
+        action().catch((error) => setStatus(`${e.shiftKey ? "Redo" : "Undo"} failed: ${error.message || error}`));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.code === "KeyY") {
+        e.preventDefault();
+        redo().catch((error) => setStatus(`Redo failed: ${error.message || error}`));
+        return;
+      }
       if (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
       if (e.code === "Space") { e.preventDefault(); state.playing ? pause() : play(); }
       if (e.code === "Home") { e.preventDefault(); seek(0); }
@@ -2495,4 +3111,7 @@
   loadBpmImages();
   refreshProjects();
   refresh();
+  rememberProjectClean();
+  updateHistoryButtons();
+  refreshFfmpegStatus();
 }());
