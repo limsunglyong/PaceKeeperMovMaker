@@ -60,6 +60,7 @@
     lamp: $("liveLamp"),
     play: $("playBtn"),
     export: $("exportBtn"),
+    exportSettings: $("exportSettingsBtn"),
     undo: $("undoBtn"),
     redo: $("redoBtn"),
     projectName: $("projectName"),
@@ -121,13 +122,16 @@
       { id: "video", label: "Video", type: "video", color: "#5b8cff", locked: true },
       { id: "audio", label: "Audio", type: "audio", color: "#2dd4bf", locked: true },
       { id: "viz", label: "Visualizer", type: "viz", color: "#a78bfa", locked: true },
-      { id: "overlay-1", label: "Overlay 1", type: "overlay", color: "#ffb020" }
+      { id: "overlay-1", label: "Overlay 1", type: "overlay", color: "#ffb020" },
+      { id: "bpm", label: "BPM", type: "bpm", color: "#ff4d5e", locked: true }
     ];
   }
   function normalizeTracks(tracks) {
-    const list = (tracks && tracks.length ? tracks : defaultTracks())
-      .filter((track) => track.type !== "bpm" && track.id !== "bpm" && track.label !== "BPM Logo");
+    const list = (tracks && tracks.length ? tracks : defaultTracks()).slice();
     if (!list.some((track) => track.type === "overlay")) list.push({ id: "overlay-1", label: "Overlay 1", type: "overlay", color: "#ffb020" });
+    if (!list.some((track) => track.type === "bpm" || track.id === "bpm")) {
+      list.push({ id: "bpm", label: "BPM", type: "bpm", color: "#ff4d5e", locked: true });
+    }
     return list;
   }
 
@@ -165,7 +169,8 @@
     pendingSwitchProjectId: null,
     cleanProjectSnapshot: "",
     pendingColorPath: "",
-    pendingColorOriginal: ""
+    pendingColorOriginal: "",
+    colorModalPosition: null
   };
 
   const refs = {
@@ -195,11 +200,22 @@
     exportStartedAt: 0,
     tap: [],
     waveCanvas: null,
-    bpmImages: {}
+    bpmImages: {},
+    colorModalDrag: null,
+    subtitleFontRedrawToken: 0
   };
 
   function setStatus(text) { el.status.textContent = text; }
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+  function hexToRgba(hex, opacity) {
+    const fallback = "#000000";
+    const value = /^#[0-9a-f]{6}$/i.test(hex || "") ? hex : fallback;
+    const alpha = clamp(Number(opacity), 0, 1);
+    const r = parseInt(value.slice(1, 3), 16);
+    const g = parseInt(value.slice(3, 5), 16);
+    const b = parseInt(value.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${Number.isFinite(alpha) ? alpha : 0.72})`;
+  }
   function mediaClips(type) { return type === "video" ? state.videoClips : state.audioClips; }
   function findMediaClip(id) {
     return state.videoClips.find((clip) => clip.id === id) || state.audioClips.find((clip) => clip.id === id) || null;
@@ -246,6 +262,25 @@
         refresh({ inspector: false, projects: false });
       }
     }, 1000);
+  }
+  function redrawSelectedSubtitleAfterFontChange(fontFamily) {
+    const sub = state.subs.find((item) => item.id === state.selected && item.type === "text");
+    if (!sub) {
+      renderFrame(state.time);
+      return;
+    }
+    const token = ++refs.subtitleFontRedrawToken;
+    const redraw = () => {
+      if (token === refs.subtitleFontRedrawToken) renderFrame(state.time);
+    };
+    redraw();
+    requestAnimationFrame(redraw);
+    if (!document.fonts || !document.fonts.load) return;
+    const size = Number.isFinite(parseFloat(sub.size)) && parseFloat(sub.size) > 0 ? parseFloat(sub.size) : 56;
+    const family = fontFamily || sub.fontFamily || SUBTITLE_FONTS[0].value;
+    const font = `${sub.fontStyle || "normal"} ${sub.fontWeight || "400"} ${size}px ${family}`;
+    document.fonts.load(font, sub.text || "New subtitle").then(redraw).catch(redraw);
+    document.fonts.ready.then(redraw).catch(redraw);
   }
   function primaryClip(type) {
     const clips = mediaClips(type);
@@ -599,6 +634,10 @@
     out.fontWeight = out.fontWeight || "400";
     out.fontStyle = out.fontStyle || "normal";
     if (out.type === "text" && out.background == null) out.background = true;
+    if (out.type === "text") {
+      out.backgroundColor = /^#[0-9a-f]{6}$/i.test(out.backgroundColor || "") ? out.backgroundColor : "#000000";
+      out.backgroundOpacity = Number.isFinite(parseFloat(out.backgroundOpacity)) ? clamp(parseFloat(out.backgroundOpacity), 0, 1) : 0.72;
+    }
     return out;
   }
   function thumbnail() {
@@ -863,7 +902,6 @@
       .filter((s) => t >= s.start && t <= s.end)
       .sort((a, b) => (trackOrder.get(a.trackId || "overlay-1") || 0) - (trackOrder.get(b.trackId || "overlay-1") || 0));
     active.forEach((s) => drawSub(s, fx));
-    active.filter((s) => s.type !== "logo").forEach((s) => drawTextSubtitle(s, fx));
     if (!state.playing && !state.exporting) {
       const selectedSub = state.subs.find((s) => s.id === state.selected);
       const selectedActive = selectedSub && active.some((s) => s.id === selectedSub.id);
@@ -971,10 +1009,7 @@
     const fontFamily = s.fontFamily || SUBTITLE_FONTS[0].value;
     const fontWeight = s.fontWeight || "400";
     const fontStyle = s.fontStyle || "normal";
-    const lines = wrapText(s.text || "New subtitle", CW * 0.82);
-    const lh = size * 1.18;
-    let y = subY * CH - (lines.length - 1) * lh / 2;
-    const x = subX * CW;
+    const font = `${fontStyle} ${fontWeight} ${size}px ${fontFamily}`;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
@@ -982,14 +1017,18 @@
     ctx.shadowBlur = 0;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
-    ctx.font = `${fontStyle} ${fontWeight} ${size}px ${fontFamily}`;
+    ctx.font = font;
+    const lines = wrapText(s.text || "New subtitle", CW * 0.82);
+    const lh = size * 1.18;
+    let y = subY * CH - (lines.length - 1) * lh / 2;
+    const x = subX * CW;
     ctx.textAlign = align;
     ctx.textBaseline = "middle";
     lines.forEach((line) => {
       const metrics = ctx.measureText(line);
       const bgX = align === "center" ? x - metrics.width / 2 : align === "right" ? x - metrics.width : x;
       if (s.background || fx.background) {
-        ctx.fillStyle = "rgba(0,0,0,.72)";
+        ctx.fillStyle = hexToRgba(s.backgroundColor, s.backgroundOpacity);
         ctx.fillRect(bgX - 18, y - size * 0.68, metrics.width + 36, size * 1.28);
       }
       if (s.shadow !== false && fx.shadow) {
@@ -1021,7 +1060,7 @@
       time: state.time,
       selected: state.selected,
       subtitleCount: state.subs.length,
-      activeSubtitles: activeSubs.map((s) => ({ id: s.id, type: s.type, text: s.text, start: s.start, end: s.end, x: s.x, y: s.y, size: s.size, color: s.color, background: s.background })),
+      activeSubtitles: activeSubs.map((s) => ({ id: s.id, type: s.type, text: s.text, start: s.start, end: s.end, x: s.x, y: s.y, size: s.size, color: s.color, background: s.background, backgroundColor: s.backgroundColor, backgroundOpacity: s.backgroundOpacity })),
       bpmSections: (state.bpmSections || []).map((section) => ({ start: section.start, end: section.end, bpm: section.bpm, level: bpmLevelFor(section.bpm).id })),
       canvas: { width: el.stage.width, height: el.stage.height }
     };
@@ -1291,6 +1330,7 @@
       state.bpmOv.enabled = false;
       el.bpmInput.value = String(state.bpm);
       setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"} at ${fmtTC(clip.start, false)}. Detected about ${clip.bpm} BPM across ${Math.max(1, clip.bpmSections.length)} section(s).`);
+      generateBpmLogoOverlay({ audioClip: clip, silent: true });
     } else {
       setStatus(`Loaded audio "${file.name}" on ${state.tracks.find((track) => track.id === state.audioTrackId)?.label || "Audio"} at ${fmtTC(clip.start, false)}.`);
     }
@@ -1301,7 +1341,7 @@
     const id = `s${Date.now()}`;
     const start = state.time;
     const end = start + 3;
-    state.subs.push(normalizeSubtitle({ id, type: "text", text: "New subtitle", start, end, trackId: activeOverlayTrackId(), x: 0.5, y: 0.74, size: 56, color: "#ffffff", background: true }));
+    state.subs.push(normalizeSubtitle({ id, type: "text", text: "New subtitle", start, end, trackId: activeOverlayTrackId(), x: 0.5, y: 0.74, size: 56, color: "#ffffff", background: true, backgroundColor: "#000000", backgroundOpacity: 0.72 }));
     state.selected = id;
     clearSelectedMediaClip();
     markFlash("sub", id);
@@ -1420,6 +1460,14 @@
     if (!options.silent) setStatus(`Created BPM Logo overlay track with ${sections.length} section(s).`);
     if (!options.silent) refresh();
   }
+  function ensureBpmLogoOverlays() {
+    state.audioClips.forEach((clip) => {
+      const hasBpm = (clip.bpmSections && clip.bpmSections.length) || clip.bpm > 0;
+      if (!hasBpm) return;
+      const hasOverlay = state.subs.some((sub) => sub.source && sub.source.kind === "bpm-logo" && sub.source.audioClipId === clip.id);
+      if (!hasOverlay) generateBpmLogoOverlay({ audioClip: clip, silent: true });
+    });
+  }
   function updateSub(id, patch) {
     const s = state.subs.find((item) => item.id === id);
     if (s) Object.assign(s, patch);
@@ -1506,8 +1554,10 @@
         `}
         ${sub.type === "text" ? `<div class="row"><label>Effect</label><select data-bind="sub.effect"><option value="">Track default</option>${["none","outline","drop","glow"].map((v) => `<option value="${v}" ${sub.effect === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>` : ""}
         ${sub.type === "text" ? `<div class="row"><label>Alignment</label><select data-bind="sub.align"><option value="">Track default</option>${["left","center","right"].map((v) => `<option value="${v}" ${sub.align === v ? "selected" : ""}>${v}</option>`).join("")}</select></div>` : ""}
+        ${sub.type === "text" ? swatches("sub.color", sub.color, "Font color") : ""}
         ${sub.type === "text" ? checkboxRow("Background", "sub.background", !!sub.background) : ""}
-        ${sub.type === "text" ? swatches("sub.color", sub.color) : ""}
+        ${sub.type === "text" ? swatches("sub.backgroundColor", sub.backgroundColor || "#000000", "Background color") : ""}
+        ${sub.type === "text" ? slider("Background opacity","sub.backgroundOpacity",sub.backgroundOpacity ?? 0.72,0,1,.01,"%") : ""}
         <button class="danger" id="deleteSubBtn">Delete</button>
       `;
     } else {
@@ -1544,8 +1594,8 @@
   function textRow(label, path, value) {
     return `<div class="row"><label>${label}</label><textarea data-bind="${path}">${escapeHtml(value)}</textarea></div>`;
   }
-  function swatches(path, value) {
-    return `<div class="row"><label>Color</label><div class="swatches">${COLORS.map((c) => `<button data-swatch="${path}:${c}" class="${value === c ? "is-on" : ""}" style="background:${c}"></button>`).join("")}<button class="rgb-swatch" data-color-pick="${path}" title="Full color">RGB</button><input data-color-input="${path}" type="color" value="${value || "#ffffff"}" hidden></div></div>`;
+  function swatches(path, value, label) {
+    return `<div class="row"><label>${label || "Color"}</label><div class="swatches">${COLORS.map((c) => `<button data-swatch="${path}:${c}" class="${value === c ? "is-on" : ""}" style="background:${c}"></button>`).join("")}<button class="rgb-swatch" data-color-pick="${path}" title="Full color">RGB</button><input data-color-input="${path}" type="color" value="${value || "#ffffff"}" hidden></div></div>`;
   }
   function escapeHtml(text) {
     return String(text).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -1583,7 +1633,28 @@
     state.pendingColorPath = path;
     state.pendingColorOriginal = current;
     el.colorModalInput.value = /^#[0-9a-f]{6}$/i.test(current) ? current : "#ffffff";
+    positionColorModal();
     el.colorModal.hidden = false;
+  }
+  function positionColorModal() {
+    if (!el.colorModal) return;
+    const modal = el.colorModal.querySelector(".color-modal");
+    if (!modal) return;
+    const rect = modal.getBoundingClientRect();
+    const fallback = {
+      x: Math.max(16, (window.innerWidth - (rect.width || 320)) / 2),
+      y: Math.max(16, (window.innerHeight - (rect.height || 220)) / 2)
+    };
+    const pos = state.colorModalPosition || fallback;
+    const maxX = Math.max(16, window.innerWidth - (rect.width || 320) - 16);
+    const maxY = Math.max(16, window.innerHeight - (rect.height || 220) - 16);
+    const next = {
+      x: clamp(pos.x, 16, maxX),
+      y: clamp(pos.y, 16, maxY)
+    };
+    state.colorModalPosition = next;
+    modal.style.left = `${next.x}px`;
+    modal.style.top = `${next.y}px`;
   }
   function closeColorModal(commit) {
     if (!state.pendingColorPath) return;
@@ -1595,6 +1666,40 @@
     state.pendingColorPath = "";
     state.pendingColorOriginal = "";
     if (el.colorModal) el.colorModal.hidden = true;
+  }
+  function startColorModalDrag(ev) {
+    if (!el.colorModal || el.colorModal.hidden) return;
+    if (ev.target.closest("button")) return;
+    const modal = el.colorModal.querySelector(".color-modal");
+    if (!modal) return;
+    const rect = modal.getBoundingClientRect();
+    refs.colorModalDrag = {
+      offsetX: ev.clientX - rect.left,
+      offsetY: ev.clientY - rect.top
+    };
+    modal.setPointerCapture?.(ev.pointerId);
+    ev.preventDefault();
+  }
+  function moveColorModalDrag(ev) {
+    if (!refs.colorModalDrag || !el.colorModal) return;
+    const modal = el.colorModal.querySelector(".color-modal");
+    if (!modal) return;
+    const rect = modal.getBoundingClientRect();
+    const maxX = Math.max(16, window.innerWidth - rect.width - 16);
+    const maxY = Math.max(16, window.innerHeight - rect.height - 16);
+    state.colorModalPosition = {
+      x: clamp(ev.clientX - refs.colorModalDrag.offsetX, 16, maxX),
+      y: clamp(ev.clientY - refs.colorModalDrag.offsetY, 16, maxY)
+    };
+    modal.style.left = `${state.colorModalPosition.x}px`;
+    modal.style.top = `${state.colorModalPosition.y}px`;
+  }
+  function endColorModalDrag(ev) {
+    const modal = el.colorModal && el.colorModal.querySelector(".color-modal");
+    if (modal) {
+      try { modal.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    }
+    refs.colorModalDrag = null;
   }
   async function refreshFfmpegStatus() {
     if (!window.pacekeeper || !window.pacekeeper.ffmpegStatus) return;
@@ -1631,6 +1736,28 @@
       else state[parts[0]][parts[1]] = value;
     }
   }
+  function inspectorValueForInput(target) {
+    const path = target.dataset.bind || target.dataset.colorInput || "";
+    const isText = target.tagName === "TEXTAREA";
+    const isCheck = target.type === "checkbox";
+    const isString = isText || target.tagName === "SELECT" || path.endsWith(".text") || path.endsWith(".color") || path.endsWith("Color") || path.endsWith(".trackId") || path.endsWith(".effect") || path.endsWith(".align");
+    return isCheck ? target.checked : isString ? target.value : parseFloat(target.value) || 0;
+  }
+  function applyInspectorBinding(target, options) {
+    options = options || {};
+    const path = target.dataset.bind || target.dataset.colorInput;
+    if (!path) return false;
+    if (target.dataset.bind && !target.dataset.historyActive && options.history !== false) {
+      pushHistory("Edit inspector");
+      target.dataset.historyActive = "1";
+    }
+    const value = inspectorValueForInput(target);
+    setPath(path, value);
+    updateInspectorValue(path, value);
+    refresh({ inspector: false, projects: false });
+    if (path === "sub.fontFamily") redrawSelectedSubtitleAfterFontChange(value);
+    return true;
+  }
 
   function renderTimeline() {
     const dur = duration() || 30;
@@ -1663,7 +1790,7 @@
     Array.from(el.timelineInner.querySelectorAll(".lane")).forEach((lane) => lane.remove());
     state.tracks.forEach((track) => {
       const lane = document.createElement("div");
-      lane.className = `lane ${track.type === "overlay" ? "subs-lane" : ""} ${trackIsSelected(track) ? "selected" : ""}${flashClass("track", track.id)}`;
+      lane.className = `lane ${track.type === "overlay" ? "subs-lane" : ""} ${track.type === "bpm" ? "bpm-lane" : ""} ${trackIsSelected(track) ? "selected" : ""}${flashClass("track", track.id)}`;
       lane.dataset.track = track.id;
       el.timelineInner.appendChild(lane);
 
@@ -1711,6 +1838,8 @@
           }
           lane.appendChild(b);
         });
+      } else if (track.type === "bpm") {
+        renderBpmLane(lane);
       }
     });
   }
@@ -1807,10 +1936,37 @@
         });
       });
     });
-    if (!sections.length && state.bpm > 0) {
-      sections.push({ start: 0, end: duration(), bpm: state.bpm, audioClipId: "" });
-    }
     return sections.sort((a, b) => a.start - b.start);
+  }
+  function renderBpmLane(lane) {
+    lane.innerHTML = "";
+    const sections = bpmTimelineSections();
+    sections.forEach((section) => {
+      if (!section.bpm || section.bpm <= 0) return;
+      const start = section.start;
+      const end = section.end;
+      const level = bpmLevelFor(section.bpm);
+      const sec = document.createElement("span");
+      sec.className = `bpm-section bpm-${level.id}`;
+      sec.style.left = `${start * state.pxPerSec}px`;
+      sec.style.width = `${Math.max(8, (end - start) * state.pxPerSec)}px`;
+      sec.textContent = `${level.label} ${section.bpm}`;
+      lane.appendChild(sec);
+      const beat = 60 / section.bpm;
+      for (let t = start + state.bpmOv.offset; t <= end; t += beat) {
+        if (t < 0) continue;
+        const line = document.createElement("span");
+        line.className = "beat-line";
+        line.style.left = `${t * state.pxPerSec}px`;
+        lane.appendChild(line);
+      }
+    });
+    if (sections.length) {
+      const tag = document.createElement("span");
+      tag.className = "bpm-tag";
+      tag.textContent = sections.length > 1 ? `${sections.length} BPM sections` : `${sections[0].bpm} BPM - ${(60 / sections[0].bpm).toFixed(2)}s/beat`;
+      lane.appendChild(tag);
+    }
   }
   function renderProjects() {
     el.projectList.innerHTML = state.projects.length ? "" : `<div class="project-card"><span class="empty-thumb"></span><div><b>No saved projects</b><small>Use Save after editing.</small></div></div>`;
@@ -2061,9 +2217,9 @@
       videoBlob: includeBlobs ? refs.videoBlob : null,
       audioBlob: includeBlobs ? refs.audioBlob : null,
       subtitleFx: state.subtitleFx,
-      subs: state.subs.filter((s) => !(s.source && s.source.kind === "bpm-logo")).map((s) => {
+      subs: state.subs.map((s) => {
         const sub = normalizeSubtitle(s);
-        return { id: sub.id, type: sub.type, text: sub.text, sourcePath: sub.sourcePath || "", url: sub.url || "", source: sub.source || null, start: sub.start, end: sub.end, trackId: sub.trackId, x: sub.x, y: sub.y, size: sub.size, color: sub.color, fontFamily: sub.fontFamily, fontWeight: sub.fontWeight, fontStyle: sub.fontStyle, effect: sub.effect, align: sub.align, background: sub.background };
+        return { id: sub.id, type: sub.type, text: sub.text, sourcePath: sub.sourcePath || "", url: sub.url || "", source: sub.source || null, start: sub.start, end: sub.end, trackId: sub.trackId, x: sub.x, y: sub.y, size: sub.size, color: sub.color, fontFamily: sub.fontFamily, fontWeight: sub.fontWeight, fontStyle: sub.fontStyle, effect: sub.effect, align: sub.align, background: sub.background, backgroundColor: sub.backgroundColor, backgroundOpacity: sub.backgroundOpacity };
       }),
       logoBlobs: includeBlobs ? Object.fromEntries(state.subs.filter((s) => s.type === "logo" && s.blob).map((s) => [s.id, s.blob])) : {}
     };
@@ -2149,7 +2305,7 @@
       el.audio.removeAttribute("src");
       el.audio.load();
     }
-    state.subs = (rec.subs || []).filter((s) => !(s.source && s.source.kind === "bpm-logo")).map((s) => {
+    state.subs = (rec.subs || []).map((s) => {
       const out = normalizeSubtitle(s);
       if (out.type === "logo" && rec.logoBlobs && rec.logoBlobs[out.id]) {
         out.blob = rec.logoBlobs[out.id];
@@ -2162,6 +2318,7 @@
       }
       return out;
     });
+    ensureBpmLogoOverlays();
     syncLegacyMediaState();
     syncMedia(state.time);
     refs.historyRestoring = false;
@@ -2281,7 +2438,7 @@
     syncLegacyMediaState();
     if (state.video) attachVideoClip(state.video);
     if (state.audio) attachAudioClip(state.audio);
-    state.subs = (rec.subs || []).filter((s) => !(s.source && s.source.kind === "bpm-logo")).map((s) => {
+    state.subs = (rec.subs || []).map((s) => {
       const out = normalizeSubtitle(s);
       if (out.type === "logo" && rec.logoBlobs && rec.logoBlobs[out.id]) {
         out.blob = rec.logoBlobs[out.id];
@@ -2294,6 +2451,7 @@
       }
       return out;
     });
+    ensureBpmLogoOverlays();
     setStatus(`Loaded project "${rec.name}".`);
     refresh();
     rememberProjectClean();
@@ -2321,7 +2479,7 @@
     state.bpmOv = { ...state.bpmOv, ...(rec.bpmOv || {}) };
     state.nativeExport = { ...state.nativeExport, ...(rec.nativeExport || {}) };
     state.subtitleFx = rec.subtitleFx || state.subtitleFx;
-    state.subs = (rec.subs || []).filter((sub) => !(sub.source && sub.source.kind === "bpm-logo")).map((sub) => {
+    state.subs = (rec.subs || []).map((sub) => {
       const out = normalizeSubtitle({ ...sub, trackId: sub.trackId || activeOverlayTrackId() });
       if (out.type === "logo" && out.url) {
         out.img = new Image();
@@ -2329,6 +2487,7 @@
       }
       return out;
     });
+    ensureBpmLogoOverlays();
     state.selected = null;
     state.selectedClipId = null;
     syncLegacyMediaState();
@@ -2542,11 +2701,8 @@
       for (let i = 1; i < refs.tap.length; i++) sum += refs.tap[i] - refs.tap[i - 1];
       const bpm = Math.round(60000 / (sum / (refs.tap.length - 1)));
       if (bpm >= 40 && bpm <= 240) {
-        pushHistory("Tap BPM");
-        state.bpm = bpm;
-        state.bpmSections = [];
         el.bpmInput.value = String(bpm);
-        refresh();
+        setStatus(`Tapped ${bpm} BPM.`);
       }
     }
   }
@@ -2765,6 +2921,12 @@
     seek(0);
     setTimeout(() => { refs.recorder.start(100); play(); }, 150);
   }
+  function showNativeExportInspector() {
+    state.selected = null;
+    clearSelectedMediaClip();
+    refresh();
+    setStatus("Native Export settings are open.");
+  }
 
   function wire() {
     window.addEventListener("resize", scheduleViewportRefresh);
@@ -2846,7 +3008,8 @@
     $("forwardBtn").onclick = () => seek(duration());
     $("stopBtn").onclick = stop;
     el.play.onclick = () => state.playing ? pause() : play();
-    el.export.onclick = exportVideo;
+    if (el.exportSettings) el.exportSettings.onclick = showNativeExportInspector;
+    el.export.onclick = () => exportVideo().catch((error) => setStatus(`Export failed: ${error.message || error}`));
     el.undo.onclick = () => undo().catch((error) => setStatus(`Undo failed: ${error.message || error}`));
     el.redo.onclick = () => redo().catch((error) => setStatus(`Redo failed: ${error.message || error}`));
     el.vizBtn.onclick = () => { state.viz.enabled = !state.viz.enabled; state.selected = "viz"; clearSelectedMediaClip(); markFlash("track", "viz"); refresh(); };
@@ -2962,18 +3125,8 @@
       refresh();
     });
     el.inspector.addEventListener("input", (e) => {
-      const path = e.target.dataset.bind;
-      if (!path) return;
-      if (!e.target.dataset.historyActive) {
-        pushHistory("Edit inspector");
-        e.target.dataset.historyActive = "1";
-      }
-      const isText = e.target.tagName === "TEXTAREA";
-      const isCheck = e.target.type === "checkbox";
-      const isString = isText || e.target.tagName === "SELECT" || path.endsWith(".text") || path.endsWith(".color") || path.endsWith(".trackId") || path.endsWith(".effect") || path.endsWith(".align");
-      setPath(path, isCheck ? e.target.checked : isString ? e.target.value : parseFloat(e.target.value) || 0);
-      updateInspectorValue(path, isCheck ? e.target.checked : isString ? e.target.value : parseFloat(e.target.value) || 0);
-      refresh({ inspector: false, projects: false });
+      if (!e.target.dataset.bind) return;
+      applyInspectorBinding(e.target);
     });
     el.inspector.addEventListener("focusin", (e) => {
       if (!e.target.dataset.bind) return;
@@ -3031,11 +3184,8 @@
       }
     });
     el.inspector.addEventListener("change", (e) => {
-      const path = e.target.dataset.colorInput;
-      if (!path) return;
-      setPath(path, e.target.value);
-      updateInspectorValue(path, e.target.value);
-      refresh({ inspector: false, projects: false });
+      if (!e.target.dataset.bind && !e.target.dataset.colorInput) return;
+      applyInspectorBinding(e.target, { history: !e.target.dataset.colorInput });
     });
     if (el.colorModalInput) {
       el.colorModalInput.addEventListener("input", () => {
@@ -3043,6 +3193,19 @@
         setPath(state.pendingColorPath, el.colorModalInput.value);
         updateInspectorValue(state.pendingColorPath, el.colorModalInput.value);
         refresh({ inspector: false, projects: false });
+      });
+    }
+    if (el.colorModal) {
+      const colorModal = el.colorModal.querySelector(".color-modal");
+      const colorHandle = el.colorModal.querySelector(".modal-head");
+      if (colorHandle) colorHandle.addEventListener("pointerdown", startColorModalDrag);
+      if (colorModal) {
+        colorModal.addEventListener("pointermove", moveColorModalDrag);
+        colorModal.addEventListener("pointerup", endColorModalDrag);
+        colorModal.addEventListener("pointercancel", endColorModalDrag);
+      }
+      window.addEventListener("resize", () => {
+        if (!el.colorModal.hidden) positionColorModal();
       });
     }
     el.projectList.onclick = (e) => {

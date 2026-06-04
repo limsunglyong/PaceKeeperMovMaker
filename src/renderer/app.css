@@ -128,6 +128,24 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   font-family: var(--mono);
   font-size: 12px;
 }
+.export-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.export-settings-btn {
+  min-width: 124px;
+  height: 38px;
+  color: rgba(232,234,240,.92);
+  background: var(--elev);
+  border: 1px solid var(--line);
+  font-weight: 400;
+}
+.export-settings-btn:hover {
+  color: #fff;
+  border-color: rgba(91,140,255,.55);
+  background: var(--elev-2);
+}
 .export-btn {
   min-width: 104px;
   height: 38px;
@@ -398,7 +416,16 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   padding: 10px;
 }
 .color-modal {
+  position: absolute;
   width: min(320px, calc(100vw - 40px));
+  left: calc(50vw - 160px);
+  top: calc(50vh - 150px);
+  max-width: calc(100vw - 32px);
+  user-select: none;
+  touch-action: none;
+}
+.color-modal .modal-head {
+  cursor: move;
 }
 .export-modal {
   width: min(380px, calc(100vw - 40px));
@@ -422,11 +449,38 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   background: linear-gradient(90deg, var(--accent), var(--cyan));
   transition: width .18s ease;
 }
+.color-picker-wrap {
+  position: relative;
+  display: block;
+  margin: 4px 0 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.color-picker-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(0,0,0,.28));
+  pointer-events: none;
+}
+.color-modal-help {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  color: rgba(255,255,255,.92);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-shadow: 0 1px 3px rgba(0,0,0,.85);
+  pointer-events: none;
+}
 .color-modal input[type="color"] {
   width: 100%;
   height: 92px;
   padding: 0;
-  margin: 4px 0 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-2);
@@ -870,6 +924,17 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
   background: rgba(0,0,0,.58);
 }
 .modal-backdrop[hidden] { display: none; }
+.modal-backdrop.floating-backdrop {
+  display: block;
+  background: transparent;
+  pointer-events: none;
+}
+.modal-backdrop.floating-backdrop[hidden] {
+  display: none;
+}
+.modal-backdrop.floating-backdrop .modal {
+  pointer-events: auto;
+}
 .modal {
   width: min(440px, calc(100vw - 40px));
   background: var(--panel);

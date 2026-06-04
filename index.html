@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Asta+Sans:wght@400;700&family=Audiowide&family=Bitcount+Grid+Single&family=Dongle:wght@400;700&family=Gowun+Batang:wght@400;700&family=Imperial+Script&family=Kings&family=Orbit&family=Raleway:wght@400;700&family=Snowburst+One&family=Story+Script&family=Tapestry&family=Tektur:wght@400;700&family=Uncial+Antiqua&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="src/renderer/app.css?v=20260604-project-scrollbar-remove-037" />
+  <link rel="stylesheet" href="src/renderer/app.css?v=20260604-font-redraw-045" />
 </head>
 <body>
   <div id="app">
@@ -15,7 +15,7 @@
       <div class="brand">
         <span class="mark"></span>
         <div>
-          <span class="brand-title"><strong>PaceKeeper</strong><span class="app-version">v0.3.7</span></span>
+          <span class="brand-title"><strong>PaceKeeper</strong><span class="app-version">v0.3.15</span></span>
           <small>Movie Maker</small>
         </div>
       </div>
@@ -34,7 +34,10 @@
         <button id="undoBtn" class="icon-btn" title="Undo" disabled>Undo</button>
         <button id="redoBtn" class="icon-btn" title="Redo" disabled>Redo</button>
       </div>
-      <button id="exportBtn" class="export-btn">Export</button>
+      <div class="export-actions" aria-label="Export actions">
+        <button id="exportSettingsBtn" class="export-settings-btn">Export Settings</button>
+        <button id="exportBtn" class="export-btn">Export</button>
+      </div>
     </header>
 
     <main class="workspace">
@@ -187,13 +190,16 @@
         </div>
       </div>
     </div>
-    <div id="colorModal" class="modal-backdrop" hidden>
+    <div id="colorModal" class="modal-backdrop floating-backdrop" hidden>
       <div class="modal color-modal" role="dialog" aria-modal="true" aria-labelledby="colorModalTitle">
         <div class="modal-head">
           <h2 id="colorModalTitle">Select Color</h2>
           <button id="colorModalClose" title="Close">x</button>
         </div>
-        <input id="colorModalInput" type="color" value="#ffffff" aria-label="Selected color" />
+        <label class="color-picker-wrap">
+          <input id="colorModalInput" type="color" value="#ffffff" aria-label="Selected color" />
+          <span class="color-modal-help">Click to change color</span>
+        </label>
         <div class="confirm-actions">
           <button id="colorModalOk">OK</button>
           <button id="colorModalCancel">CANCEL</button>
@@ -201,6 +207,6 @@
       </div>
     </div>
   </div>
-  <script src="src/renderer/app.js?v=20260604-project-scrollbar-remove-037"></script>
+  <script src="src/renderer/app.js?v=20260604-font-redraw-045"></script>
 </body>
 </html>
