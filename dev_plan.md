@@ -2,8 +2,15 @@
 
 ## 변경 기록
 
+### 2026-06-05
+
+- WebM export metadata 한계 정정 및 버전 증가: 실제 브라우저/직접 실행 export 경로는 Canvas `MediaRecorder` 기반 `.webm` 다운로드이며, 이 경로의 WebM 파일 정보에는 metadata가 기록되지 않는 것을 확인했다. 이전 `0.4.2`의 MP3 metadata 반영 코드는 Electron native FFmpeg MP4 export 경로에만 적용되는 1차 구현이며, 현재 WebM 다운로드 결과에는 적용되지 않는다. 브라우저 `MediaRecorder` API는 WebM container metadata를 직접 지정하는 옵션을 제공하지 않으므로, WebM 파일 정보까지 기록하려면 Electron/FFmpeg 기반 WebM mux/remux 경로 또는 native export 경로로 전환해야 한다. WebM export 완료 status/modal 문구에 metadata 미기록 한계를 표시하도록 보강했다. 앱 버전은 `0.4.3`으로 올리고 CSS/JS cache query를 `20260605-webm-metadata-note-049`로 갱신했다.
+- Native MP4 export metadata 1차 구현 기록: Native FFmpeg export 완료 시 대표 MP3/audio 파일의 metadata를 FFmpeg `ffmetadata` 출력으로 읽고, 최종 MP4에 `title`, `description`, `artist`, `composer`, `director`, `content_provider`, `creation_time`, `encoded_by`, `copyright` metadata를 기록하는 경로를 추가했다. 제목은 MP3 `title`, 설명은 `description` 또는 `comment`, 참여 음악가는 `composer`를 우선 사용하고 없으면 `artist`/`album_artist`를 사용한다. 감독, 콘텐츠 공급자, 인코딩한 사람, 저작권은 참여 음악가와 동일하게 기록하며, 미디어 작성 날짜는 export generation 시각을 ISO timestamp로 기록한다.
+- 다음 작업 계획 정리: WebM metadata 기록은 필수 기능이 아니므로 우선순위를 낮추고 보류 항목으로 둔다. 다음 실제 구현 우선순위는 export 해상도/원본 해상도 선택 고도화로 정한다. 1차 범위는 `Export Settings`에 `1280x720`, `1920x1080`, `Original/Auto` 해상도 preset을 추가하고, native FFmpeg export에서 선택 해상도에 맞춰 scale 처리 또는 export frame 크기 조정을 연결하는 것이다. WebM export는 계속 빠른 preview/확인용으로 유지하고, 최종 산출물은 native FFmpeg MP4 경로를 중심으로 품질 설정을 다듬는다. 구현 시 앱 버전은 `0.4.4` 후보로 올린다.
+
 ### 2026-06-04
 
+- v0.4.1 안정화 검증 기록: 수동 확인으로 다중 video clip 합성이 preview/export에서 track 순서대로 동작하는 것을 확인했다. Native FFmpeg export의 다중 audio mix는 `trimStart`, `trimEnd`, `start`, `volume`, `muted` 세부 조합을 모두 완전 검증하지는 못했지만 현재 큰 문제는 없어 보이는 상태로 기록한다. Background layer 이미지는 video보다 뒤에 깔리고, drag/size Inspector 조작 대상에서 제외되는 것을 확인했다. 정적 검증으로 `node --check src/renderer/app.js`, `node --check src/main/main.js`, `node --check src/preload/preload.js`가 모두 통과했다. 다음 개발 우선순위는 native export 해상도/설정 고도화와 missing media/assets 정책 정리로 둔다.
 - Overlay 이미지 Background layer 추가 및 버전 증가: Overlay track에 로드한 이미지(`logo` item)를 Inspector의 `Layer`에서 `Overlay` 또는 `Background`로 선택할 수 있게 했다. `Background`로 선택한 이미지는 video clip보다 먼저 Canvas에 그려지며, `cover` 방식으로 1280x720 화면을 100% 채운다. Background 이미지는 위치 이동과 크기 조절을 할 수 없도록 Inspector의 X/Y/Logo size 조절을 숨기고, Canvas 직접 드래그 hit-test에서도 제외했다. 기존 이미지 overlay는 기본값 `Overlay`로 유지된다. 앱 버전은 `0.4.1`로 올리고 CSS/JS cache query를 `20260604-bg-layer-047`로 갱신했다.
 - Native export 다중 clip 연동 1차 및 버전 증가: 1순위 작업으로 preview/export frame render에서 같은 시간에 활성화된 여러 video clip을 track 순서대로 합성하도록 변경했다. renderer는 clip별 hidden video element cache를 사용해 각 video clip을 해당 프로젝트 시간의 source time으로 sync/seek하고, 하위 track부터 상위 track 순서로 Canvas에 그린다. Native FFmpeg export는 여러 audio clip을 전달받아 main process에서 `atrim`, `asetpts`, `volume`, `adelay`, `amix` 기반 `filter_complex`로 합성한다. clip별 `start`, `trimStart`, `trimEnd`, `volume`, `muted`를 반영하며, preview audio는 안정성을 위해 기존 대표 audio clip 재생 방식을 유지한다. 앱 버전은 `0.4.0`으로 올리고 CSS/JS cache query를 `20260604-multiclip-export-046`으로 갱신했다.
 - 후속과제 정리: 다음 고도화 작업은 `Native export + 다중 clip 연동`을 1순위로 둔다. 1차 범위는 preview/export frame render에서 같은 시간에 활성화된 여러 video clip을 track 순서대로 합성하고, native FFmpeg export에서 여러 audio clip을 `atrim`/`adelay`/`volume`/`amix` filter graph로 섞는 것이다. Preview audio는 안정성을 위해 당분간 기존 대표 audio clip 재생을 유지하고, 이후 Web Audio 기반 다중 audio preview mixer를 별도 과제로 진행한다. 후속 과제는 다중 video clip의 opacity/transform/PIP 옵션, track별 mute/volume, missing media relink UX, assets 폴더 복사 정책, export 해상도/원본 해상도 선택, BPM 구간 감지 confidence/onset 경계 개선, overlay track reorder로 정리한다.
@@ -760,7 +767,15 @@ node --check src/main/main.js
 node --check src/preload/preload.js
 ```
 
-브라우저 자동화 검증은 샌드박스 런타임 문제로 수행하지 못했다. 수동 실행 검증은 다음 명령 또는 `index.html` 직접 열기로 진행한다.
+2026-06-05 기준 위 세 명령이 모두 통과했다.
+
+v0.4.1 수동 확인 결과:
+
+- 다중 video clip 합성이 preview/export에서 track 순서대로 동작한다.
+- Native FFmpeg export의 다중 audio mix는 세부 조합을 모두 확인하지는 못했지만 현재 큰 문제는 없어 보인다.
+- Background layer 이미지는 video보다 뒤에 깔리고, drag/size Inspector 조작 대상에서 제외된다.
+
+브라우저 자동화 검증은 Windows sandbox `spawn setup refresh` 문제로 수행하지 못했다. 수동 실행 검증은 다음 명령 또는 `index.html` 직접 열기로 진행한다.
 
 ```powershell
 cd D:\roseWorks\programming\PaceKeeperMovMaker
@@ -772,10 +787,14 @@ npm.cmd start
 
 ## 11. 현재 한계
 
-- 최종 MP4 export는 아직 native FFmpeg가 아니다.
-- Electron 파일 dialog import는 아직 프로젝트 저장/열기 중심이며, media import는 renderer file input 중심이다.
+- 현재 브라우저/직접 실행 export는 `MediaRecorder` 기반 WebM 다운로드이며, WebM 파일 정보 metadata는 기록되지 않는다.
+- 최종 MP4 export는 native FFmpeg 기반 1차 구현이 되었지만, 출력 해상도/원본 해상도 선택과 export 설정 고도화가 아직 필요하다.
+- Electron native FFmpeg MP4 export에는 MP3 metadata 반영 경로가 있으나, 사용자가 실제로 내려받는 WebM fallback에는 적용되지 않는다.
+- Preview audio는 안정성을 위해 대표 audio clip 재생 방식을 유지한다. 여러 audio clip을 동시에 미리듣는 Web Audio 기반 mixer는 후속 과제다.
+- Native FFmpeg 다중 audio mix는 기본 동작상 큰 문제는 없어 보이나, `trimStart`, `trimEnd`, `start`, `volume`, `muted`의 세부 조합별 회귀 검증은 더 필요하다.
+- Missing media relink UX는 아직 구현되지 않았다.
 - React/TypeScript 모듈 구조는 아직 적용되지 않았다.
-- 프로젝트 JSON만 이동하면 media Blob은 함께 가지 않는다. assets 폴더 정책이 필요하다.
+- 프로젝트 JSON만 이동하면 media Blob이나 로컬 media reference가 함께 가지 않는다. assets 폴더 복사 정책이 필요하다.
 - 기존 legacy prototype 파일은 아직 정리되지 않았다.
 
 ---
@@ -794,7 +813,10 @@ npm.cmd start
 
 남은 수동 확인 항목:
 
-- 현재 없음.
+- 다음 작업: export 해상도 preset(`1280x720`, `1920x1080`, `Original/Auto`)과 native FFmpeg scale/export frame 처리 방식 구현.
+- Native FFmpeg export에서 다중 audio mix의 `trimStart`, `trimEnd`, `start`, `volume`, `muted` 세부 조합별 확인.
+- missing media relink UX와 assets 폴더 복사 정책 결정.
+- 낮은 우선순위 보류: WebM export metadata 기록. 필요해지면 Electron/FFmpeg WebM mux/remux 방식으로 재검토.
 
 현재 자동 검증으로 확인한 항목:
 
@@ -810,7 +832,7 @@ node --check src/preload/preload.js
 
 ## 14. 버전 표기
 
-현재 앱 버전: `0.4.1`
+현재 앱 버전: `0.4.3`
 
 버전 표시 위치:
 

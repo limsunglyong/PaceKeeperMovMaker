@@ -143,6 +143,65 @@ function audioFilterForClips(clips, projectDuration) {
   return filters.join(";");
 }
 
+function escapeFfmpegMetadataValue(value) {
+  return String(value || "")
+    .replace(/\r?\n/g, " ")
+    .trim();
+}
+
+function parseFfmpegMetadata(text) {
+  const metadata = {};
+  String(text || "").split(/\r?\n/).forEach((line) => {
+    if (!line || line.startsWith(";") || !line.includes("=")) return;
+    const index = line.indexOf("=");
+    const key = line.slice(0, index).trim().toLowerCase();
+    const value = line.slice(index + 1).trim();
+    if (key && value) metadata[key] = value;
+  });
+  return metadata;
+}
+
+async function readMediaMetadata(filePath) {
+  if (!filePath) return {};
+  try {
+    const output = await runFfmpeg([
+      "-hide_banner",
+      "-i", filePath,
+      "-f", "ffmetadata",
+      "-"
+    ]);
+    return parseFfmpegMetadata(output);
+  } catch (_) {
+    return {};
+  }
+}
+
+function exportMetadataFromAudioTags(tags, generationDate) {
+  const title = tags.title || "";
+  const description = tags.description || tags.comment || "";
+  const musician = tags.composer || tags.artist || tags.album_artist || tags.albumartist || "";
+  const metadata = {
+    creation_time: generationDate
+  };
+  if (title) metadata.title = title;
+  if (description) metadata.description = description;
+  if (musician) {
+    metadata.artist = musician;
+    metadata.composer = musician;
+    metadata.director = musician;
+    metadata.content_provider = musician;
+    metadata.encoded_by = musician;
+    metadata.copyright = musician;
+  }
+  return metadata;
+}
+
+function metadataArgs(metadata) {
+  return Object.entries(metadata || {})
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
+    .flatMap(([key, value]) => ["-metadata", `${key}=${escapeFfmpegMetadataValue(value)}`]);
+}
+
 async function ffmpegVersion() {
   const output = await runFfmpeg(["-version"]);
   return output.split(/\r?\n/)[0] || "ffmpeg";
@@ -261,6 +320,9 @@ ipcMain.handle("export:finishNative", async (_event, session, options) => {
   const crf = String(options.crf ?? 18);
   const preset = options.preset || "medium";
   const audioClips = audioClipsFromExportOptions(options);
+  const metadataSourcePath = options.metadataAudioPath || (audioClips.find((clip) => /\.mp3$/i.test(clip.path)) || audioClips[0] || {}).path || "";
+  const audioTags = await readMediaMetadata(metadataSourcePath);
+  const exportMetadata = exportMetadataFromAudioTags(audioTags, new Date().toISOString());
   const args = [
     "-y",
     "-framerate", String(fps),
@@ -279,6 +341,8 @@ ipcMain.handle("export:finishNative", async (_event, session, options) => {
     "-pix_fmt", "yuv420p"
   );
   if (audioClips.length) args.push("-c:a", "aac", "-b:a", options.audioBitrate || "192k");
+  const metaArgs = metadataArgs(exportMetadata);
+  if (metaArgs.length) args.push("-movflags", "use_metadata_tags", ...metaArgs);
   args.push(session.outputPath);
   try {
     await runFfmpeg(args, (text) => {

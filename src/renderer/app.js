@@ -2875,6 +2875,10 @@
         volume: clamp(Number(clip.volume ?? state.musicAudio.volume) || 0, 0, 1)
       }));
   }
+  function metadataAudioPathForNativeExport(audioClips) {
+    const clipPaths = (audioClips || []).map((clip) => clip.path).filter(Boolean);
+    return clipPaths.find((clipPath) => /\.mp3$/i.test(clipPath)) || clipPaths[0] || "";
+  }
   function waitForMediaSeek(media, target, timeout) {
     if (!media || !media.src) return Promise.resolve();
     if (media.readyState >= 2 && !media.seeking && Math.abs((media.currentTime || 0) - target) < 0.08) return Promise.resolve();
@@ -2954,6 +2958,7 @@
         preset: state.nativeExport.preset || "medium",
         audioBitrate: state.nativeExport.audioBitrate || "192k",
         duration: duration(),
+        metadataAudioPath: metadataAudioPathForNativeExport(audioClips),
         audioClips
       });
       setStatus(`Native MP4 export complete: ${result.outputPath}`);
@@ -3004,8 +3009,8 @@
       }
       state.exporting = false;
       el.export.textContent = "Export";
-      setStatus(canceled ? "Export canceled." : "Preview export complete. Native MP4 export is wired for the desktop FFmpeg phase.");
-      completeExportModal(canceled ? "Export canceled." : "Export complete. File download started.");
+      setStatus(canceled ? "Export canceled." : "WebM export complete. Browser WebM export does not embed file metadata.");
+      completeExportModal(canceled ? "Export canceled." : "Export complete. WebM download started without embedded file metadata.");
       refresh();
     };
     state.exporting = true;
